@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.RECORD_AUDIO" />
+  <application>
+    <!--
+      Player Settings -> "Application Entry Point" is set to GameActivity
+      (androidApplicationEntry: 2 in ProjectSettings.asset), so the launcher
+      activity is UnityPlayerGameActivity, not the legacy UnityPlayerActivity.
+      This activity must be declared here (with a real android:name) because
+      the Meta Quest Support OpenXR feature merges a
+      "com.oculus.intent.category.VR" <category> into the launcher activity's
+      intent-filter by matching on android:name - without an activity of that
+      name already present, the manifest merger has nothing to merge into and
+      emits an orphan <activity> with no name, which fails Android's manifest
+      validation ("Missing 'name' key attribute on element activity").
+    -->
+    <activity android:name="com.unity3d.player.UnityPlayerGameActivity"
+              android:theme="@style/BaseUnityGameActivityTheme">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+      <meta-data android:name="unityplayer.UnityActivity" android:value="true" />
+      <meta-data android:name="android.app.lib_name" android:value="game" />
+    </activity>
+  </application>
+</manifest>

@@ -1,0 +1,53 @@
+# python
+__pycache__/
+*.pyc
+
+# lokale setup logs
+unity/*.log
+
+# unity generated
+unity/BioimageVR/[Ll]ibrary/
+unity/BioimageVR/[Tt]emp/
+unity/BioimageVR/[Oo]bj/
+unity/BioimageVR/[Bb]uild/
+unity/BioimageVR/[Bb]uilds/
+unity/BioimageVR/[Ll]ogs/
+unity/BioimageVR/[Uu]serSettings/
+unity/BioimageVR/.utmp/
+unity/BioimageVR/[Mm]emoryCaptures/
+
+# vs / rider / md generated
+unity/BioimageVR/.vs/
+unity/BioimageVR/.idea/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# unity crash / build junk
+sysinfo.txt
+crashlytics-build.properties
+*.apk
+*.aab
+
+# claude code lokale einstellungen
+/.claude/
+
+# eigene dokumentation, nicht fuer das repo
+/architecture.md
+/STATUS.md
+/CONVENTIONS.md
+/unity/VOICE_VLM.md
+/unity/README.md
+/related work/
+/Screenshot*.png
