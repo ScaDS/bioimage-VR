@@ -47,7 +47,23 @@ crashlytics-build.properties
 /architecture.md
 /STATUS.md
 /CONVENTIONS.md
+/CHATMICROSCOPY.md
+/RAG_TESTING.md
 /unity/VOICE_VLM.md
 /unity/README.md
 /related work/
 /Screenshot*.png
+
+# erzeugte/neu ladbare daten, nicht fuer das repo
+/data/idr/
+/data/rag_index/
+/data/rag_eval_*
+/data/vlm_playground_log.csv
+/preprocessing/vlm_playground_data/
+/preprocessing/.ipynb_checkpoints/
+
+# unity crash recovery
+/unity/BioimageVR/Assets/_Recovery/
+
+# offiziell importiertes unity sample, bei bedarf ueber den package manager neu holen
+/unity/BioimageVR/Assets/Samples/

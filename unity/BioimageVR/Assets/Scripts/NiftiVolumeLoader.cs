@@ -1,11 +1,12 @@
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.Text;
 using UnityEngine;
 
 namespace BioimageVR
 {
-    // nifti reader, nur uint8 einkanal, mit gzip und byte order erkennung
+    // nifti reader, uint8 einkanal oder rgb24, mit gzip und byte order erkennung
     // mehr datentypen spaeter phase
     public static class NiftiVolumeLoader
     {
@@ -19,13 +20,25 @@ namespace BioimageVR
             // voxel abstand aus pixdim, gegen verzerrung bei nicht kubischen volumen
             public Vector3 VoxelSize;
 
-            // rohe voxel, x schnell y z langsam
+            // rohe voxel, x schnell y z langsam - bei rgb 3 bytes pro voxel (r,g,b)
             // gebraucht fuer slice views und koordinaten mapping ohne readback
             public byte[] Voxels;
+
+            public bool IsColor;
+
+            // true wenn r,g,b drei ROHE, unabhaengige kanal-intensitaeten sind statt
+            // einer schon fertig gemischten farbe - siehe LIVE_CHANNELS_MARKER
+            public bool IsLiveChannels;
         }
 
         private const int HeaderSize = 348;
         private const short DT_UINT8 = 2;
+        private const short DT_RGB24 = 128;
+        private const int DescripOffset = 148;
+        private const int DescripLength = 80;
+
+        // muss exakt zu preprocessing/convert_to_volume.py: LIVE_CHANNELS_MARKER passen
+        private static readonly byte[] LiveChannelsMarker = Encoding.ASCII.GetBytes("biovr:live_channels");
 
         public static Volume Load(string path)
         {
@@ -42,12 +55,16 @@ namespace BioimageVR
                 dim[i] = ReadInt16(bytes, 40 + i * 2, swap);
 
             short datatype = ReadInt16(bytes, 70, swap);
-            if (datatype != DT_UINT8)
+            if (datatype != DT_UINT8 && datatype != DT_RGB24)
             {
                 throw new NotSupportedException(
-                    $"NIfTI datatype code {datatype} is not supported. This loader only reads uint8 volumes " +
-                    "(datatype 2), which is what preprocessing/convert_to_volume.py always produces.");
+                    $"NIfTI datatype code {datatype} is not supported. This loader only reads uint8 (2) or " +
+                    "RGB24 (128) volumes, which is what preprocessing/convert_to_volume.py always produces.");
             }
+
+            bool isColor = datatype == DT_RGB24;
+            bool isLiveChannels = isColor && HasMarker(bytes, DescripOffset, DescripLength, LiveChannelsMarker);
+            int bytesPerVoxel = isColor ? 3 : 1;
 
             float[] pixdim = new float[8];
             for (int i = 0; i < 8; i++)
@@ -59,22 +76,18 @@ namespace BioimageVR
             int sizeY = dim[2];
             int sizeZ = dim[0] >= 3 ? dim[3] : 1;
             int voxelCount = sizeX * sizeY * sizeZ;
+            int byteCount = voxelCount * bytesPerVoxel;
 
             int dataOffset = voxOffset >= HeaderSize ? (int)voxOffset : 352;
-            if (dataOffset + voxelCount > bytes.Length)
+            if (dataOffset + byteCount > bytes.Length)
                 throw new InvalidDataException($"'{path}' header declares {voxelCount} voxels but the file is too short.");
 
-            byte[] voxels = new byte[voxelCount];
-            Array.Copy(bytes, dataOffset, voxels, 0, voxelCount);
+            byte[] voxels = new byte[byteCount];
+            Array.Copy(bytes, dataOffset, voxels, 0, byteCount);
 
-            // nifti layout passt schon zu texture3d, keine umsortierung noetig
-            Texture3D texture = new Texture3D(sizeX, sizeY, sizeZ, TextureFormat.R8, false)
-            {
-                wrapMode = TextureWrapMode.Clamp,
-                filterMode = FilterMode.Bilinear
-            };
-            texture.SetPixelData(voxels, 0);
-            texture.Apply();
+            Texture3D texture = isColor
+                ? BuildRgbaTexture(sizeX, sizeY, sizeZ, voxels)
+                : BuildGrayscaleTexture(sizeX, sizeY, sizeZ, voxels);
 
             return new Volume
             {
@@ -83,11 +96,61 @@ namespace BioimageVR
                 SizeY = sizeY,
                 SizeZ = sizeZ,
                 Voxels = voxels,
+                IsColor = isColor,
+                IsLiveChannels = isLiveChannels,
                 VoxelSize = new Vector3(
                     pixdim[1] > 0 ? pixdim[1] : 1f,
                     pixdim[2] > 0 ? pixdim[2] : 1f,
                     pixdim[3] > 0 ? pixdim[3] : 1f)
             };
+        }
+
+        private static Texture3D BuildGrayscaleTexture(int sizeX, int sizeY, int sizeZ, byte[] voxels)
+        {
+            // nifti layout passt schon zu texture3d, keine umsortierung noetig
+            var texture = new Texture3D(sizeX, sizeY, sizeZ, TextureFormat.R8, false)
+            {
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            };
+            texture.SetPixelData(voxels, 0);
+            texture.Apply();
+            return texture;
+        }
+
+        // rgb24 hat nur 3 bytes/voxel, Texture3D braucht aber ein von der gpu
+        // unterstuetztes format - RGBA32 ist am zuverlaessigsten plattformuebergreifend,
+        // deshalb hier interleaved r,g,b auf r,g,b,a=255 pro voxel aufblasen
+        private static Texture3D BuildRgbaTexture(int sizeX, int sizeY, int sizeZ, byte[] rgbVoxels)
+        {
+            int voxelCount = sizeX * sizeY * sizeZ;
+            byte[] rgba = new byte[voxelCount * 4];
+            for (int i = 0; i < voxelCount; i++)
+            {
+                rgba[i * 4 + 0] = rgbVoxels[i * 3 + 0];
+                rgba[i * 4 + 1] = rgbVoxels[i * 3 + 1];
+                rgba[i * 4 + 2] = rgbVoxels[i * 3 + 2];
+                rgba[i * 4 + 3] = 255;
+            }
+
+            var texture = new Texture3D(sizeX, sizeY, sizeZ, TextureFormat.RGBA32, false)
+            {
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            };
+            texture.SetPixelData(rgba, 0);
+            texture.Apply();
+            return texture;
+        }
+
+        // prueft ob 'field' (offset/length im header) mit 'marker' beginnt - descrip ist
+        // ein 80-byte freitext-feld, nullterminiert/nullgepolstert, deshalb praefix-check
+        private static bool HasMarker(byte[] bytes, int offset, int length, byte[] marker)
+        {
+            if (offset + length > bytes.Length || marker.Length > length) return false;
+            for (int i = 0; i < marker.Length; i++)
+                if (bytes[offset + i] != marker[i]) return false;
+            return true;
         }
 
         private static bool LooksGzipped(byte[] bytes)

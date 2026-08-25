@@ -36,18 +36,41 @@ namespace BioimageVR.EditorSetup
             if (voiceHarness == null)
                 voiceHarness = go.AddComponent<VoiceVLMHarness>();
 
+            // dispatcher fuers tool-calling (siehe VLMToolDispatcher.cs, CHATMICROSCOPY.md
+            // 3.2) - bindet an die heute gebauten regler, damit gesprochene befehle wie
+            // "mach heller" die slider im panel direkt mitbewegen
+            VLMToolDispatcher toolDispatcher = go.GetComponent<VLMToolDispatcher>();
+            if (toolDispatcher == null)
+                toolDispatcher = go.AddComponent<VLMToolDispatcher>();
+
+            var dispatcherSo = new SerializedObject(toolDispatcher);
+            dispatcherSo.FindProperty("contrastControl").objectReferenceValue = Object.FindFirstObjectByType<VolumeContrastControl>();
+            dispatcherSo.FindProperty("renderControls").objectReferenceValue = Object.FindFirstObjectByType<VolumeRenderControls>();
+            dispatcherSo.ApplyModifiedProperties();
+
+            // rag kontext fuers gerade geladene bild (siehe RagClient.cs, CHATMICROSCOPY.md
+            // rag umbau) - server adresse bleibt erhalten, dieses objekt wird hier nur
+            // gefunden/ergaenzt, nie zerstoert/neu gebaut wie das seitenpanel
+            RagClient ragClient = go.GetComponent<RagClient>();
+            if (ragClient == null)
+                ragClient = go.AddComponent<RagClient>();
+
             Text responseText = GameObject.Find("VLMResponseText")?.GetComponent<Text>();
+            var so = new SerializedObject(voiceHarness);
             if (responseText != null)
-            {
-                var so = new SerializedObject(voiceHarness);
                 so.FindProperty("responseText").objectReferenceValue = responseText;
-                so.ApplyModifiedProperties();
-            }
+            so.FindProperty("toolDispatcher").objectReferenceValue = toolDispatcher;
+            so.FindProperty("volumeView").objectReferenceValue = Object.FindFirstObjectByType<VolumeView>();
+            so.ApplyModifiedProperties();
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
             Debug.Log("BioimageVR: Voice VLM setup complete - press Play, hold V (or right controller " +
-                      "index trigger) while speaking, then release.");
+                      "index trigger) while speaking, then release. Gesprochene Befehle wie 'erhoeh den " +
+                      "Kontrast' steuern jetzt direkt die Render-Regler (Tool-Calling). Neu: RagClient " +
+                      "Komponente am selben Objekt holt vorm Fragen Kontext zum aktuell geladenen Bild - " +
+                      "'Server Base Url' dort auf die von preprocessing/upload_server.py angezeigte " +
+                      "WLAN-Adresse setzen (Server muss laufen, sonst wird die Frage ohne Kontext gestellt).");
         }
     }
 }

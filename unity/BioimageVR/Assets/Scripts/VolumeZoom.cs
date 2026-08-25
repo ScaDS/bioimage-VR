@@ -1,10 +1,12 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 namespace BioimageVR
 {
     // zoomt durch skalieren, mausrad am desktop, rechter thumbstick am controller
     // wartet auf volumeview load event, sonst ist basescale noch falsch
+    // pausiert wenn der rechte strahl gerade aufs panel zeigt, dann scrollt der stick da
     [RequireComponent(typeof(VolumeView))]
     public class VolumeZoom : MonoBehaviour
     {
@@ -13,6 +15,7 @@ namespace BioimageVR
         [SerializeField] private float controllerDeadzone = 0.15f;
         [SerializeField] private float minScaleMultiplier = 0.2f;
         [SerializeField] private float maxScaleMultiplier = 20f;
+        [SerializeField] private XRRayInteractor rightHandRay;
 
         private VolumeView volumeView;
         private InputAction controllerZoomAction;
@@ -58,6 +61,7 @@ namespace BioimageVR
         private void CaptureBaseScale()
         {
             baseScale = transform.localScale;
+            scaleMultiplier = 1f;
             ready = true;
         }
 
@@ -65,8 +69,10 @@ namespace BioimageVR
         {
             if (!ready) return;
 
+            bool pointingAtPanel = rightHandRay != null && rightHandRay.TryGetCurrentUIRaycastResult(out _);
+
             float zoomDelta = Input.mouseScrollDelta.y;
-            if (Mathf.Approximately(zoomDelta, 0f))
+            if (Mathf.Approximately(zoomDelta, 0f) && !pointingAtPanel)
             {
                 float stickY = controllerZoomAction.ReadValue<Vector2>().y;
                 if (Mathf.Abs(stickY) > controllerDeadzone)

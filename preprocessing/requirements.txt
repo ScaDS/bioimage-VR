@@ -6,3 +6,10 @@ imageio
 natsort
 nibabel
 numpy
+fastapi
+uvicorn
+python-multipart
+chromadb
+matplotlib
+trimesh
+fast_simplification

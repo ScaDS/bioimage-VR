@@ -14,9 +14,9 @@ namespace BioimageVR
 
         private readonly List<string> messages = new List<string>();
 
-        public void AddUserMessage(string text) => Add($"Du: {text}");
-        public void AddAssistantMessage(string text) => Add($"VLM: {text}");
-        public void AddSystemMessage(string text) => Add(text);
+        public void AddUserMessage(string text) => Add($"<b><color=#{UITheme.Hex(UITheme.Accent)}>Du</color></b>  {text}");
+        public void AddAssistantMessage(string text) => Add($"<b><color=#{UITheme.Hex(UITheme.AccentSecondary)}>VLM</color></b>  {text}");
+        public void AddSystemMessage(string text) => Add($"<color=#{UITheme.Hex(UITheme.Warning)}>{text}</color>");
 
         private void Add(string line)
         {

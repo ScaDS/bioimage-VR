@@ -18,6 +18,8 @@ namespace BioimageVR
         [Tooltip("World-space diameter of the 3D marker sphere, independent of the volume's own (possibly non-uniform) scale.")]
         [SerializeField] private float markerWorldSize = 0.03f;
 
+        private GameObject marker;
+
         private void Awake()
         {
             if (volumeView == null)
@@ -26,10 +28,9 @@ namespace BioimageVR
                 return;
             }
 
+            volumeView.OnVolumeLoaded += OnVolumeLoaded;
             if (volumeView.LoadedVolume != null)
                 OnVolumeLoaded(volumeView.LoadedVolume);
-            else
-                volumeView.OnVolumeLoaded += OnVolumeLoaded;
         }
 
         private void OnVolumeLoaded(NiftiVolumeLoader.Volume volume)
@@ -80,8 +81,10 @@ namespace BioimageVR
             float w = (z + 0.5f) / volume.SizeZ;
             Vector3 localPos = new Vector3(u - 0.5f, v - 0.5f, w - 0.5f);
 
+            if (marker != null) Destroy(marker);
+
             Transform volumeTransform = volumeView.transform;
-            var marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
             marker.name = "Phase2TestMarker";
             Destroy(marker.GetComponent<Collider>());
 

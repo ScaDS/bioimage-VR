@@ -1,13 +1,11 @@
 using System.Collections;
 using UnityEngine;
-using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // manueller test fuer vlmclient, taste oder controller button
+    // manueller test fuer vlmclient, nur tastatur - A-Taste ist jetzt der panel klick
     // macht screenshot, feste frage, antwort in text
-    // beide eingaben gleichzeitig aktiv, desktop und headset gleiche szene
     //
     // screenshot faengt spectator fenster ein, nicht das echte augenbild
     // bei falscher antwort auf dem geraet stattdessen rendertexture nutzen
@@ -21,30 +19,16 @@ namespace BioimageVR
         [SerializeField] private ChatPanel chatPanel;
 
         private VLMClient client;
-        private InputAction controllerAskAction;
         private bool requestInFlight;
 
         private void Awake()
         {
             client = GetComponent<VLMClient>();
-            // rechter primaerknopf, generischer xrcontroller pfad, funktioniert ueberall
-            controllerAskAction = new InputAction(
-                type: InputActionType.Button,
-                binding: "<XRController>{RightHand}/primaryButton");
-            controllerAskAction.Enable();
-        }
-
-        private void OnDestroy()
-        {
-            controllerAskAction?.Disable();
-            controllerAskAction?.Dispose();
         }
 
         private void Update()
         {
-            bool triggered = Input.GetKeyDown(triggerKey)
-                              || (controllerAskAction != null && controllerAskAction.WasPressedThisFrame());
-            if (requestInFlight || !triggered) return;
+            if (requestInFlight || !Input.GetKeyDown(triggerKey)) return;
             StartCoroutine(CaptureAndAsk());
         }
 
