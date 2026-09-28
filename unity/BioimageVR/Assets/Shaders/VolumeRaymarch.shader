@@ -9,7 +9,9 @@ Shader "BioimageVR/VolumeRaymarch"
         _VolumeTex ("Volume Texture", 3D) = "white" {}
         _Density ("Density", Range(0.01, 5)) = 1.0
         _Threshold ("Intensity Threshold", Range(0, 1)) = 0.12
-        _StepCount ("Ray Steps", Range(16, 256)) = 96
+        // 03.09.: 96 -> 160 angehoben, gegen sichtbares "schichten"/banding beim
+        // raymarchen (STATUS.md 26.08., Punkt 2 wunschliste, guenstigster hebel zuerst)
+        _StepCount ("Ray Steps", Range(16, 256)) = 160
         // von VolumeView.cs gesetzt je nachdem ob das geladene volumen graustufen
         // (R8, nur .r belegt) oder echtes rgb (RGBA32) ist - kein Inspector-regler
         [HideInInspector] _IsColor ("Is Color", Float) = 0
@@ -26,6 +28,15 @@ Shader "BioimageVR/VolumeRaymarch"
         [Toggle] _EnableShading ("Gradient Shading", Float) = 1
         _ThresholdMax ("Cut Range Max", Range(0, 1)) = 1.0
         [Enum(Translucent,0,MIP,1)] _RenderMode ("Render Mode", Float) = 0
+        // 22.09.: sigg/hadwiger tricubic (8 statt 64 fetches), siehe SampleVoxelCubic.
+        // eigener toggle statt fest an, weil das den hauptsample teuer macht (8x) -
+        // live testbar/rueckgaengig zu machen ohne shader-rebuild, falls zu teuer
+        [Toggle] _TricubicFilter ("Tricubic Filter", Float) = 1
+        // segmentierung, von VolumeView gesetzt wenn eine _labels datei da ist
+        [HideInInspector] _LabelTex ("Label Texture", 3D) = "black" {}
+        [HideInInspector] _HasLabels ("Has Labels", Float) = 0
+        [Toggle] _ShowLabels ("Show Labels", Float) = 0
+        [HideInInspector] _SelectedLabel ("Selected Label", Float) = 0
     }
 
     SubShader
@@ -50,6 +61,12 @@ Shader "BioimageVR/VolumeRaymarch"
 
             TEXTURE3D(_VolumeTex);
             SAMPLER(sampler_VolumeTex);
+            // point filter kommt von der textur selbst, ids duerfen nicht gemischt werden
+            TEXTURE3D(_LabelTex);
+            SAMPLER(sampler_LabelTex);
+            float _HasLabels;
+            float _ShowLabels;
+            float _SelectedLabel;
             float _Density;
             float _Threshold;
             float _ThresholdMax;
@@ -64,10 +81,15 @@ Shader "BioimageVR/VolumeRaymarch"
             float _Channel1On;
             float _Channel2On;
             float _EnableShading;
+            float _TricubicFilter;
             // von VolumeView.cs gesetzt: 1/SizeX,Y,Z - gradient braucht einen zur
             // aufloesung passenden sampling-abstand, sonst zu grob (grosse volumen)
             // oder zu verrauscht (kleine volumen)
             float3 _VolumeTexelSize;
+            // von VolumeView.cs gesetzt: SizeX,Y,Z in texeln - fuer die tricubic
+            // filterung noetig, _VolumeTexelSize allein reicht nicht (ist 1.5x skaliert
+            // fuers gradienten-sampling, keine echte texelgroesse)
+            float3 _VolumeSize;
 
             struct Attributes
             {
@@ -131,6 +153,108 @@ Shader "BioimageVR/VolumeRaymarch"
                 return intensity;
             }
 
+            // id aus lo und hi byte, siehe NiftiVolumeLoader.BuildLabelTexture
+            float SampleLabel(float3 uvw)
+            {
+                float2 rg = SAMPLE_TEXTURE3D_LOD(_LabelTex, sampler_LabelTex, uvw, 0).rg;
+                return round(rg.r * 255.0) + 256.0 * round(rg.g * 255.0);
+            }
+
+            // feste farbe pro id, hue ueber goldenen schnitt, benachbarte ids weit auseinander
+            half3 LabelColor(float id)
+            {
+                float h = frac(id * 0.61803398875);
+                half3 rgb = saturate(abs(frac(h + float3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0);
+                return lerp(half3(1, 1, 1), rgb, 0.65h);
+            }
+
+            // segmentierung ueber die rohfarbe legen, gewaehlte zelle staerker, rest gedimmt
+            half3 ApplyLabel(half3 color, float3 uvw)
+            {
+                if (_ShowLabels < 0.5 || _HasLabels < 0.5) return color;
+                float id = SampleLabel(uvw);
+                bool anySelected = _SelectedLabel > 0.5;
+                if (id < 0.5) return anySelected ? color * 0.5h : color;
+                bool selected = abs(id - _SelectedLabel) < 0.5;
+                half tintAmount = anySelected ? (selected ? 0.85h : 0.25h) : 0.6h;
+                half3 tinted = lerp(color, LabelColor(id) * max(max(color.r, color.g), max(color.b, 0.35h)) * 1.4h, tintAmount);
+                return anySelected && !selected ? tinted * 0.5h : tinted;
+            }
+
+            // b-spline gewichte einer achse aus v (bruchteil zwischen zwei texeln),
+            // sigg/hadwiger gpu gems 2 kap. 20 - w0..w3 summieren sich immer zu 1
+            half4 CubicWeights(half v)
+            {
+                half4 n = half4(1.0h, 2.0h, 3.0h, 4.0h) - v;
+                half4 s = n * n * n;
+                half x = s.x;
+                half y = s.y - 4.0h * s.x;
+                half z = s.z - 4.0h * s.y + 6.0h * s.x;
+                half w = 6.0h - x - y - z;
+                return half4(x, y, z, w) * (1.0h / 6.0h);
+            }
+
+            // tricubic filterung ueber 8 statt 64 texture fetches (sigg/hadwiger trick,
+            // 22.09.: vtk/slicer vergleich, siehe VOLUME_RENDERING_RESEARCH.md punkt 2).
+            // je zwei benachbarte b-spline gewichte lassen sich zu einem einzigen
+            // trilinearen hardware-fetch mit passendem offset zusammenfassen - pro achse
+            // 4 gewichte -> 2 fetches, bei 3 achsen macht das aus 4*4*4=64 nur 2*2*2=8
+            void SampleVoxelCubic(float3 uvw, out half3 color, out half intensity)
+            {
+                float3 coord = uvw * _VolumeSize - 0.5;
+                float3 texelIndex = floor(coord);
+                half3 f = half3(coord - texelIndex);
+
+                half4 wx = CubicWeights(f.x);
+                half4 wy = CubicWeights(f.y);
+                half4 wz = CubicWeights(f.z);
+
+                half gx0 = wx.x + wx.y, gx1 = wx.z + wx.w;
+                half gy0 = wy.x + wy.y, gy1 = wy.z + wy.w;
+                half gz0 = wz.x + wz.y, gz1 = wz.z + wz.w;
+
+                float3 invSize = 1.0 / _VolumeSize;
+                float hx0 = (texelIndex.x - 0.5 + wx.y / gx0) * invSize.x;
+                float hx1 = (texelIndex.x + 1.5 + wx.w / gx1) * invSize.x;
+                float hy0 = (texelIndex.y - 0.5 + wy.y / gy0) * invSize.y;
+                float hy1 = (texelIndex.y + 1.5 + wy.w / gy1) * invSize.y;
+                float hz0 = (texelIndex.z - 0.5 + wz.y / gz0) * invSize.z;
+                float hz1 = (texelIndex.z + 1.5 + wz.w / gz1) * invSize.z;
+
+                half3 c000, c100, c010, c110, c001, c101, c011, c111;
+                half i000, i100, i010, i110, i001, i101, i011, i111;
+                SampleVoxel(float3(hx0, hy0, hz0), c000, i000);
+                SampleVoxel(float3(hx1, hy0, hz0), c100, i100);
+                SampleVoxel(float3(hx0, hy1, hz0), c010, i010);
+                SampleVoxel(float3(hx1, hy1, hz0), c110, i110);
+                SampleVoxel(float3(hx0, hy0, hz1), c001, i001);
+                SampleVoxel(float3(hx1, hy0, hz1), c101, i101);
+                SampleVoxel(float3(hx0, hy1, hz1), c011, i011);
+                SampleVoxel(float3(hx1, hy1, hz1), c111, i111);
+
+                // erst x, dann y, dann z zusammenmischen - g0 ist das gewicht richtung
+                // "niedrig" (hx0/hy0/hz0), g0+g1 ist immer 1 also reicht lerp mit g0
+                half3 cx00 = lerp(c100, c000, gx0), cx10 = lerp(c110, c010, gx0);
+                half3 cx01 = lerp(c101, c001, gx0), cx11 = lerp(c111, c011, gx0);
+                half ix00 = lerp(i100, i000, gx0), ix10 = lerp(i110, i010, gx0);
+                half ix01 = lerp(i101, i001, gx0), ix11 = lerp(i111, i011, gx0);
+
+                half3 cxy0 = lerp(cx10, cx00, gy0), cxy1 = lerp(cx11, cx01, gy0);
+                half ixy0 = lerp(ix10, ix00, gy0), ixy1 = lerp(ix11, ix01, gy0);
+
+                color = lerp(cxy1, cxy0, gz0);
+                intensity = lerp(ixy1, ixy0, gz0);
+            }
+
+            // haupt-sample fuers eigentliche signal - tricubic nur hier, nicht fuer
+            // den gradienten (ApplyShading bleibt bei SampleIntensity/trilinear,
+            // sonst waeren das 8x mehr fetches pro schritt nur fuers shading)
+            void SampleVoxelMain(float3 uvw, out half3 color, out half intensity)
+            {
+                if (_TricubicFilter > 0.5) SampleVoxelCubic(uvw, color, intensity);
+                else SampleVoxel(uvw, color, intensity);
+            }
+
             // vorwaerts-differenz gradient (3 statt 6 extra samples, zentrum ist eh schon
             // gesampelt) als pseudo-normale, "kopflampe" von der kamera aus statt echtem
             // szenen-licht - kein extra lighting setup, aber gibt der struktur sichtbar
@@ -148,8 +272,29 @@ Shader "BioimageVR/VolumeRaymarch"
 
                 float3 normalOS = -grad / gradLen; // intensitaet steigt nach innen -> normale nach aussen
                 float3 viewDirOS = normalize(camOS - samplePosOS);
-                half ndotl = saturate(dot(normalOS, viewDirOS));
-                return color * lerp(0.5h, 1.15h, ndotl);
+                half ndotv = saturate(dot(normalOS, viewDirOS));
+
+                // kopflampe sitzt an der kamera, licht und blickrichtung fallen
+                // zusammen, der halbvektor fuers specular ist dadurch einfach ndotv.
+                // vtk's presets nutzen echtes ambient/diffuse/specular statt nur
+                // diffus wie vorher hier, das glanzlicht liest sich als feste
+                // oberflaeche statt als rauschen (siehe VOLUME_RENDERING research)
+                half diffuse = lerp(0.5h, 1.05h, ndotv);
+                half specular = 0.35h * pow(ndotv, 24.0h);
+                return saturate(color * diffuse + specular);
+            }
+
+            // billiger screen-space hash (keine textur/noise-map noetig) - streut den
+            // start jedes strahls um einen zufaelligen bruchteil einer schrittweite,
+            // bricht dadurch das feste "an jedem pixel exakt an derselben relativen
+            // tiefe abgetastet"-muster auf, das als sichtbare schichten/ringe um
+            // strukturen erscheint (STATUS.md 26.08., Punkt 2 wunschliste, standardtrick
+            // gegen raymarch-banding, keine mehrkosten an samples)
+            float RayJitter(float2 screenPos)
+            {
+                float2 p = frac(screenPos * float2(443.897, 441.423));
+                p += dot(p, p.yx + 19.19);
+                return frac((p.x + p.y) * p.x);
             }
 
             // schnitt strahl mit einheitswuerfel, objekt raum
@@ -185,7 +330,8 @@ Shader "BioimageVR/VolumeRaymarch"
 
                 tNear = max(tNear, 0.0);
                 float stepSize = (tFar - tNear) / _StepCount;
-                float3 pos = rayOrigin + rayDir * tNear;
+                float jitter = RayJitter(i.positionHCS.xy);
+                float3 pos = rayOrigin + rayDir * (tNear + jitter * stepSize);
 
                 if (_RenderMode > 0.5)
                 {
@@ -204,7 +350,7 @@ Shader "BioimageVR/VolumeRaymarch"
                         float3 uvw = pos + 0.5;
                         half3 color;
                         half intensity;
-                        SampleVoxel(uvw, color, intensity);
+                        SampleVoxelMain(uvw, color, intensity);
 
                         if (intensity > _Threshold && intensity <= _ThresholdMax && intensity > bestIntensity)
                         {
@@ -220,6 +366,7 @@ Shader "BioimageVR/VolumeRaymarch"
                     if (!hit) discard;
 
                     float3 bestUvw = bestPos + 0.5;
+                    bestColor = ApplyLabel(bestColor, bestUvw);
                     half3 finalColor = ApplyShading(bestColor, bestIntensity, bestUvw, bestPos, camOS);
                     return half4(finalColor, 1);
                 }
@@ -232,17 +379,20 @@ Shader "BioimageVR/VolumeRaymarch"
                     float3 uvw = pos + 0.5; // objekt raum auf textur raum 0 bis 1
                     half3 color;
                     half intensity;
-                    SampleVoxel(uvw, color, intensity);
+                    SampleVoxelMain(uvw, color, intensity);
 
                     if (intensity > _Threshold && intensity <= _ThresholdMax)
                     {
-                        // 0 direkt ueber threshold, 1 beim maximum - quadriert fuer steileren
-                        // kontrast (schwaches/mittleres signal traegt kaum noch zum nebel bei,
-                        // vorher lineares intensity*density sorgte fuer den milchigen look)
+                        // 0 direkt ueber threshold, 1 beim maximum. smoothstep statt reinem
+                        // quadrat (21.09.: vtk/slicer vergleich, siehe VOLUME_RENDERING
+                        // research) - draengt rauschen nah der schwelle genauso weg, laesst
+                        // mittlere werte aber nicht mehr so stark absacken wie das alte
+                        // quadrat, naeher an vtk's stueckweise-linearen opacity-rampen
                         half shaped = saturate((intensity - _Threshold) / max(1.0 - _Threshold, 0.0001));
-                        shaped *= shaped;
+                        shaped = shaped * shaped * (3.0h - 2.0h * shaped);
                         half alpha = saturate(shaped * _Density * stepSize * 10.0);
 
+                        color = ApplyLabel(color, uvw);
                         half3 shadedColor = ApplyShading(color, intensity, uvw, pos, camOS);
 
                         accum.rgb += (1.0 - accum.a) * alpha * shadedColor;

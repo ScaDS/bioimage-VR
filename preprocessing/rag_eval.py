@@ -29,7 +29,14 @@ VISION_MODEL = "alias-vision"
 THUMBNAIL_URL = "https://idr.openmicroscopy.org/webclient/render_thumbnail/{id}/"
 
 OUTPUT_CSV = DATA_ROOT.parent / "rag_eval_results.csv"
-CSV_FIELDS = ["image_id", "fact_type", "question", "expected", "answer", "correct"]
+CSV_FIELDS = ["image_id", "fact_type", "question", "condition", "expected", "answer", "correct"]
+
+# "lab" fuer punkt 14 der wunschliste (STATUS.md 25.08.): nicht nur pruefen ob rag
+# insgesamt funktioniert, sondern explizit vergleichen wie das vlm mit vs ohne die
+# rag-metadaten abschneidet - zeigt wie viel das modell rein aus dem bild selbst
+# "weiss"/errät gegenueber dem was ihm erst per kontext gesagt werden muss
+CONDITION_WITH_CONTEXT = "mit_kontext"
+CONDITION_WITHOUT_CONTEXT = "ohne_kontext"
 
 
 def _api_key() -> str:
@@ -90,6 +97,13 @@ def _ask_vlm(question: str, context: str, image_bytes: bytes) -> str:
         raise RuntimeError(f"vlm anfrage fehlgeschlagen: {error.code} {error.read().decode(errors='replace')}") from error
     except urllib.error.URLError as error:
         raise RuntimeError(f"vlm gateway nicht erreichbar: {error.reason}") from error
+    except TimeoutError as error:
+        # urllib wrappt nicht jeden socket-timeout zuverlaessig in URLError (siehe
+        # session 26.08. - ein einzelner haenger hat sonst den ganzen lauf abgebrochen
+        # und alle bisherigen ergebnisse mitgerissen, weil vorher erst am ende
+        # geschrieben wurde - jetzt schreibt run() ohnehin pro zeile, aber trotzdem
+        # sauber als RuntimeError behandeln statt den lauf abstuerzen zu lassen)
+        raise RuntimeError(f"vlm anfrage timeout: {error}") from error
     return data["choices"][0]["message"]["content"] or ""
 
 
@@ -118,7 +132,14 @@ def _grade(fact_type: str, expected: str, answer: str) -> bool:
 
 
 def run(limit: int | None = None) -> None:
+    # zeilenweise schreiben statt erst am ende (siehe session 26.08.) - ein einzelner
+    # timeout mitten im lauf hat sonst alle bisherigen ergebnisse mitgerissen, weil
+    # vorher nur ganz am schluss auf einmal geschrieben wurde
     rows = []
+    csv_file = open(OUTPUT_CSV, "w", newline="", encoding="utf-8")
+    writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDS)
+    writer.writeheader()
+
     image_dirs = sorted(d for d in DATA_ROOT.iterdir() if d.is_dir())
     if limit:
         image_dirs = image_dirs[:limit]
@@ -143,28 +164,41 @@ def run(limit: int | None = None) -> None:
             question = QUESTIONS[fact_type]
             try:
                 context = _rag_context(question, image_id)
-                answer = _ask_vlm(question, context, image_bytes)
             except RuntimeError as error:
-                print(f"[{image_id}/{fact_type}] fehlgeschlagen: {error}")
+                print(f"[{image_id}/{fact_type}] rag kontext fehlgeschlagen: {error}")
                 continue
 
-            correct = _grade(fact_type, expected, answer)
-            rows.append({
-                "image_id": image_id,
-                "fact_type": fact_type,
-                "question": question,
-                "expected": expected,
-                "answer": answer,
-                "correct": correct,
-            })
-            mark = "OK" if correct else "FEHLER"
-            print(f"[{image_id}/{fact_type}] {mark}  erwartet={expected!r}  antwort={answer[:80]!r}")
-            time.sleep(0.2)
+            # zwei durchlaeufe pro fakt: einmal mit rag kontext (wie in der echten app),
+            # einmal ohne (nur bild+frage) - der vergleich ist der eigentliche zweck
+            # dieses labs, nicht nur die einzelne trefferquote
+            for condition, condition_context in (
+                (CONDITION_WITH_CONTEXT, context),
+                (CONDITION_WITHOUT_CONTEXT, ""),
+            ):
+                try:
+                    answer = _ask_vlm(question, condition_context, image_bytes)
+                except RuntimeError as error:
+                    print(f"[{image_id}/{fact_type}/{condition}] fehlgeschlagen: {error}")
+                    continue
 
-    with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
-        writer.writeheader()
-        writer.writerows(rows)
+                correct = _grade(fact_type, expected, answer)
+                row = {
+                    "image_id": image_id,
+                    "fact_type": fact_type,
+                    "question": question,
+                    "condition": condition,
+                    "expected": expected,
+                    "answer": answer,
+                    "correct": correct,
+                }
+                rows.append(row)
+                writer.writerow(row)
+                csv_file.flush()
+                mark = "OK" if correct else "FEHLER"
+                print(f"[{image_id}/{fact_type}/{condition}] {mark}  erwartet={expected!r}  antwort={answer[:80]!r}")
+                time.sleep(0.2)
+
+    csv_file.close()
 
     correct_count = sum(1 for r in rows if r["correct"])
     print(f"\nfertig: {len(rows)} fragen, {correct_count} richtig ({correct_count / len(rows):.0%}) -> {OUTPUT_CSV}")

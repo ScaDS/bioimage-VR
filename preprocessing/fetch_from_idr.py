@@ -74,6 +74,27 @@ def has_zarr(image_id: int) -> bool:
         return False
 
 
+def get_size_z(image_id: int) -> int | None:
+    """nur SizeZ eines bildes holen, ohne key value annotationen zu laden - leichter
+    als fetch_metadata(), fuers massenhafte pruefen in is_3d() beim durchblaettern"""
+    with urllib.request.urlopen(f"{API_BASE}/api/v0/m/images/{image_id}/", timeout=15) as response:
+        image = json.load(response)["data"]
+    return image.get("Pixels", {}).get("SizeZ")
+
+
+def is_3d(image_id: int) -> bool:
+    """ob ein bild ueberhaupt ein 3d stack ist (SizeZ>1) - sehr viele idr quellen sind
+    2d objekttraeger scans, fuer den vr volumen viewer ohnehin ungeeignet selbst wenn
+    sie zufaellig ein zarr volumen haetten (stichprobe 25.08.: 18 von 30 studien hatten
+    im ersten bild SizeZ>1, deutlich besser als die zarr trefferquote - trotzdem lohnt
+    sich das rausfiltern, siehe idr_list level=images in upload_server.py)"""
+    try:
+        size_z = get_size_z(image_id)
+        return bool(size_z and size_z > 1)
+    except Exception:
+        return False
+
+
 def fetch_metadata(image_id: int) -> dict:
     """bildinfo und key value annotationen von der idr api holen"""
     with urllib.request.urlopen(f"{API_BASE}/api/v0/m/images/{image_id}/", timeout=15) as response:
@@ -200,6 +221,26 @@ def list_project_dataset_ids(project_id: int) -> list[int]:
     return ids
 
 
+def _save_thumbnail(volume, path: Path) -> None:
+    """mittlerer z-schnitt als schnelle vorschau (siehe Punkt 4 der wunschliste,
+    STATUS.md 25.08.) - zeigt ungefaehr wie das volumen im viewer aussehen wird, weil es
+    dieselben schon entrauschten/kontrast-gestreckten daten nutzt statt idrs eigenes
+    thumbnail (andere darstellung/ohne unsere pipeline). rgb (z,y,x,3) und graustufen
+    (z,y,x) beide direkt speicherbar, kein extra umbau noetig"""
+    import imageio.v3 as iio
+
+    mid_z = volume.shape[0] // 2
+    iio.imwrite(path, volume[mid_z])
+
+
+def thumbnail_path_for(volume_path: Path) -> Path:
+    """vorschau-pfad aus dem volumen-pfad ableiten (<name>_thumbnail.jpg statt fix
+    'thumbnail.jpg') - kollisionsfrei falls mehrere volumen mal im selben ordner landen,
+    z.b. beim adb push aufs geraet (siehe deploy_to_headset.push_to_device, das alles
+    flach in persistentDataPath ablegt statt in eigenen unterordnern wie lokal)"""
+    return volume_path.with_name(f"{volume_path.stem.removesuffix('.nii')}_thumbnail.jpg")
+
+
 def fetch_one(image_id: int, name: str | None = None, denoise: bool = True, max_voxels: int = MAX_VOXELS) -> Path:
     """ein bild laden und konvertieren, gibt den pfad des volumens zurueck"""
     name = name or f"idr_{image_id}"
@@ -207,12 +248,16 @@ def fetch_one(image_id: int, name: str | None = None, denoise: bool = True, max_
     out_dir.mkdir(parents=True, exist_ok=True)
     volume_path = out_dir / f"{name}.nii.gz"
     metadata_path = out_dir / "metadata.json"
+    thumbnail_path = thumbnail_path_for(volume_path)
 
     zarr_url = resolve_zarr_url(image_id)
     print(f"[{image_id}] zarr gefunden: {zarr_url}")
 
     volume = convert(zarr_url, volume_path, denoise=denoise, max_voxels=max_voxels)
     print(f"[{image_id}] volumen gespeichert: {volume_path} shape={volume.shape}")
+
+    _save_thumbnail(volume, thumbnail_path)
+    print(f"[{image_id}] vorschau gespeichert: {thumbnail_path}")
 
     metadata = fetch_metadata(image_id)
     metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -225,6 +270,21 @@ def push_one(volume_path: Path, package: str) -> None:
     adb = find_adb()
     check_single_device(adb)
     push_to_device(adb, volume_path, package)
+
+    thumbnail_path = thumbnail_path_for(volume_path)
+    if thumbnail_path.is_file():
+        push_to_device(adb, thumbnail_path, package)
+
+    # metadata.json liegt lokal einmal pro idr-bild-ordner (siehe fetch_one), auf dem
+    # geraet landet aber alles flach im selben verzeichnis (siehe push_to_device) - mit
+    # umbenennung pushen, sonst wuerden mehrere bilder sich die eine datei teilen bzw.
+    # gegenseitig ueberschreiben. gleiches namensschema wie thumbnail_path_for, siehe
+    # VolumeMetadataPanel.cs auf der unity seite
+    metadata_path = volume_path.with_name("metadata.json")
+    if metadata_path.is_file():
+        remote_name = f"{volume_path.stem.removesuffix('.nii')}_metadata.json"
+        push_to_device(adb, metadata_path, package, remote_name=remote_name)
+
     ensure_api_key_pushed(adb, package)
     print(f"[{volume_path.name}] gepusht")
 

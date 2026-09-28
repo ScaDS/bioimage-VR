@@ -19,6 +19,9 @@ import matplotlib.pyplot as plt
 CSV_PATH = Path(__file__).resolve().parent.parent / "data" / "rag_eval_results.csv"
 PNG_PATH = CSV_PATH.with_name("rag_eval_report.png")
 HEATMAP_PATH = CSV_PATH.with_name("rag_eval_heatmap.png")
+CONTEXT_COMPARISON_PATH = CSV_PATH.with_name("rag_eval_context_comparison.png")
+
+CONDITION_LABELS = {"mit_kontext": "Mit RAG-Kontext", "ohne_kontext": "Ohne Kontext (nur Bild)"}
 
 # stand: dataviz skill referenzpalette, status.good/warning/critical
 COLOR_GOOD = "#0ca30c"
@@ -153,6 +156,78 @@ def build_heatmap(rows: list[dict]) -> None:
     print(f"heatmap gespeichert: {HEATMAP_PATH}")
 
 
+def build_context_comparison_chart(rows: list[dict]) -> None:
+    """kernstueck des "lab"-punkts (Punkt 14 der Wunschliste, STATUS.md 25.08.): zeigt
+    pro fakt-typ die trefferquote mit rag-kontext neben der trefferquote ganz ohne
+    kontext (nur bild+frage) - eine grosse luecke heisst das vlm "weiss"/erraet das
+    kaum selbst und ist stark auf den rag-kontext angewiesen, eine kleine luecke heisst
+    es kann viel schon direkt aus dem bild bzw. antrainiertem wissen beantworten.
+    laeuft nur ueber zeilen die ein 'condition' feld haben - aeltere csv-staende ohne
+    das feld (vor diesem umbau) werden sauber uebersprungen statt zu crashen"""
+    rows = [r for r in rows if r.get("condition")]
+    if not rows:
+        print("keine vergleichsdaten (condition fehlt) - rag_eval.py mit dem aktuellen "
+              "stand neu laufen lassen fuer den mit/ohne kontext vergleich")
+        return
+
+    fact_types = sorted({r["fact_type"] for r in rows}, key=lambda ft: FACT_LABELS.get(ft, ft))
+    conditions = ["mit_kontext", "ohne_kontext"]
+    condition_colors = {"mit_kontext": COLOR_GOOD, "ohne_kontext": COLOR_MUTED}
+
+    accuracy = {}
+    counts = {}
+    for condition in conditions:
+        for fact_type in fact_types:
+            cell_rows = [r for r in rows if r["fact_type"] == fact_type and r["condition"] == condition]
+            accuracy[(condition, fact_type)] = sum(r["correct"] for r in cell_rows) / len(cell_rows) if cell_rows else 0.0
+            counts[(condition, fact_type)] = len(cell_rows)
+
+    x = range(len(fact_types))
+    bar_width = 0.35
+    fig, ax = plt.subplots(figsize=(10, 5.5), facecolor=COLOR_SURFACE)
+    ax.set_facecolor(COLOR_SURFACE)
+
+    for i, condition in enumerate(conditions):
+        offsets = [xi + (i - 0.5) * bar_width for xi in x]
+        heights = [accuracy[(condition, ft)] * 100 for ft in fact_types]
+        bars = ax.bar(offsets, heights, width=bar_width, color=condition_colors[condition],
+                       label=CONDITION_LABELS[condition], zorder=3)
+        for bar, ft in zip(bars, fact_types):
+            n = counts[(condition, ft)]
+            if n == 0:
+                continue
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 2, f"{bar.get_height():.0f}%",
+                    ha="center", va="bottom", fontsize=8, color=COLOR_INK)
+
+    overall_with = [r["correct"] for r in rows if r["condition"] == "mit_kontext"]
+    overall_without = [r["correct"] for r in rows if r["condition"] == "ohne_kontext"]
+    with_pct = sum(overall_with) / len(overall_with) if overall_with else 0.0
+    without_pct = sum(overall_without) / len(overall_without) if overall_without else 0.0
+
+    ax.set_ylim(0, 130)  # platz ueber 100% fuer die balken-beschriftung UND die legende
+    ax.set_ylabel("Trefferquote", color=COLOR_MUTED, fontsize=9)
+    ax.set_title(
+        f"VLM mit vs. ohne RAG-Kontext: {with_pct:.0%} vs. {without_pct:.0%} gesamt richtig "
+        f"({with_pct - without_pct:+.0%} Punkte Unterschied)",
+        color=COLOR_INK, fontsize=12, loc="left", pad=14,
+    )
+    ax.set_xticks(list(x))
+    ax.set_xticklabels([FACT_LABELS.get(ft, ft) for ft in fact_types], rotation=15, ha="right")
+    ax.yaxis.grid(True, color=COLOR_GRID, linewidth=1, zorder=0)
+    ax.set_axisbelow(True)
+    for spine in ("top", "right", "left"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["bottom"].set_color(COLOR_GRID)
+    ax.tick_params(axis="both", colors=COLOR_MUTED, length=0)
+    ax.set_yticks([0, 25, 50, 75, 100])
+    ax.set_yticklabels(["0%", "25%", "50%", "75%", "100%"])
+    ax.legend(frameon=False, labelcolor=COLOR_INK, loc="upper right")
+
+    fig.tight_layout()
+    fig.savefig(CONTEXT_COMPARISON_PATH, dpi=150)
+    print(f"kontext-vergleich gespeichert: {CONTEXT_COMPARISON_PATH}")
+
+
 def print_wrong_answers(rows: list[dict]) -> None:
     wrong = [r for r in rows if not r["correct"]]
     if not wrong:
@@ -171,6 +246,7 @@ def main() -> None:
         return
     build_chart(rows)
     build_heatmap(rows)
+    build_context_comparison_chart(rows)
     print_wrong_answers(rows)
 
 

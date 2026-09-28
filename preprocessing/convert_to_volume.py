@@ -181,17 +181,24 @@ def normalize_to_uint8(volume: np.ndarray, denoise: bool = True) -> np.ndarray:
 
 
 def _to_nifti_image(volume: np.ndarray, live_channels: bool = False) -> nib.Nifti1Image:
-    """graustufen (z,y,x) direkt, rgb (z,y,x,3) als nifti rgb24 (datatype 128) -
+    """volume kommt als (z,y,x) bzw (z,y,x,3) rein (bioio/slice-stapel-reihenfolge).
+    nibabel uebernimmt array-achse 0/1/2 direkt als nifti dim[1]/[2]/[3] (x/y/z) -
+    ohne transpose wuerden wir also z als x und x als z ausgeben (gefunden 22.09.,
+    beleg: nifti dim vs. metadata.json size vertauscht). erst hier auf echtes (x,y,z)
+    drehen, ab dann passt "nifti layout passt zu texture3d" (NiftiVolumeLoader.cs)
+    tatsaechlich.
+    graustufen (x,y,z) direkt, rgb (x,y,z,3) als nifti rgb24 (datatype 128) -
     standardkonform, jedes 'voxel' 3 interleaved bytes r,g,b statt eine extra dimension.
     live_channels setzt LIVE_CHANNELS_MARKER im descrip-header-feld (80 byte freitext,
     fuer genau sowas gedacht) - unterscheidet "r,g,b sind drei rohe kanaele" von
     "r,g,b ist schon eine fertige farbe" (z.b. bereits farbige slice-bilder)"""
     if volume.ndim == 4:
+        volume = volume.transpose(2, 1, 0, 3)  # (z,y,x,3) -> (x,y,z,3)
         packed = np.zeros(volume.shape[:3], dtype=[("R", "u1"), ("G", "u1"), ("B", "u1")])
         packed["R"], packed["G"], packed["B"] = volume[..., 0], volume[..., 1], volume[..., 2]
         data = packed
     else:
-        data = volume
+        data = volume.transpose(2, 1, 0)  # (z,y,x) -> (x,y,z)
     # identitaets affine, kein klinischer scan, keine umorientierung
     # spaeter nochmal pruefen falls phase 2 koordinaten mapping was braucht
     image = nib.Nifti1Image(data, affine=np.eye(4))

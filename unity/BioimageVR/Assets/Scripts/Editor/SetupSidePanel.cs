@@ -33,7 +33,7 @@ namespace BioimageVR.EditorSetup
 
             AllowInsecureHttp();
             EnsureEventSystem();
-            EnsureLeftHandRay();
+            XRRayInteractor leftHandRay = EnsureLeftHandRay();
             XRRayInteractor rightHandRay = EnsureRightHandRay();
             RemoveStalePanels();
 
@@ -41,14 +41,22 @@ namespace BioimageVR.EditorSetup
             WireHarness(Object.FindFirstObjectByType<VLMTestHarness>(), controller);
             WireHarness(Object.FindFirstObjectByType<VoiceVLMHarness>(), controller);
             WireVolumeZoom(rightHandRay);
+            WireVolumeRotate(leftHandRay);
+            WireMeasureTool(leftHandRay, rightHandRay);
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
             Debug.Log("BioimageVR: Side panel setup complete - beide Controller identisch belegt: " +
                       "zeigen und Primaerknopf (X links, A rechts) klickt UI ueberall, gehalten auf " +
                       "der DragBar zieht/verschiebt das Panel wie ein Mausklick. Stick scrollt wo der " +
-                      "Strahl gerade zeigt. Hamburger-Knopf oben links im Panel oeffnet ein Ausklapp-" +
-                      "menu (Chat/Bilder/Einstellungen), Chat ist die Standardseite. Im Bilder-Tab " +
+                      "Strahl gerade zeigt, rechter Stick zoomt das Volumen, linker Stick dreht es frei, " +
+                      "unten mittig im HUD schaltet Lineal das Messen ein (danach erscheint Auto daneben), dann misst X/A ausserhalb des Panels " +
+                      "(beide pausieren automatisch sobald der jeweilige Strahl aufs Panel zeigt). " +
+                      "Hamburger-Knopf oben links im Panel oeffnet ein Ausklapp-" +
+                      "menu (Chat/Bilder/Einstellungen), Chat ist die Standardseite. Unten rechts/links " +
+                      "togglen zwei kamera-fixierte Icons ihr eigenes Fenster (Chat-Kurzverlauf bzw. " +
+                      "Metadaten-Tafel des aktuell geladenen Bilds) direkt ueber sich selbst - bleibt " +
+                      "immer am Icon, unabhaengig davon wo das greifbare Seitenpanel gerade ist. Im Bilder-Tab " +
                       "oben Lokal/Aus IDR umschaltbar - dafuer 'IdrClient' Komponente am " +
                       "SideCanvas-Objekt die 'Server Base Url' auf die von preprocessing/" +
                       "upload_server.py angezeigte WLAN-Adresse setzen (Server muss dafuer laufen).");
@@ -89,7 +97,7 @@ namespace BioimageVR.EditorSetup
         }
 
         // beide controller gleich belegt, siehe EnsureHandRay
-        private static void EnsureLeftHandRay() => EnsureHandRay("LeftHand Ray", "LeftHand");
+        private static XRRayInteractor EnsureLeftHandRay() => EnsureHandRay("LeftHand Ray", "LeftHand");
 
         private static XRRayInteractor EnsureRightHandRay() => EnsureHandRay("RightHand Ray", "RightHand");
 
@@ -250,7 +258,24 @@ namespace BioimageVR.EditorSetup
                 out Button shadingButton, out Text shadingLabel,
                 out Button channel0Button, out Text channel0Label,
                 out Button channel1Button, out Text channel1Label,
-                out Button channel2Button, out Text channel2Label);
+                out Button channel2Button, out Text channel2Label,
+                out Button segmentationButton, out Text segmentationLabel);
+
+            // eigene, kamera-fixierte hud-ebene fuer die beiden ecken-icons UND ihre
+            // fenster (Punkt 5+11 wunschliste, seit 03.09. beide inhalte statt nur der
+            // knoepfe im hud) - haengt direkt an der kamera (siehe CreateHud), dadurch
+            // immer unten links/rechts im sichtbereich sichtbar, egal wohin der nutzer
+            // schaut oder ob das greifbare side panel gerade offen/geschlossen/weit weg
+            // ist. Eric's wunsch nach dem ersten test: nicht erst zum seitenpanel schauen
+            // muessen, um info/chat zu lesen - beide fenster bleiben jetzt direkt an
+            // ihrem knopf, nicht mehr auf dem side panel canvas
+            Canvas hudCanvas = CreateHud(cam);
+            Button chatShortcutButton = CreateCornerIcon(hudCanvas.transform, atRight: true, UITheme.ChatIconSprite());
+            Button infoButton = CreateCornerIcon(hudCanvas.transform, atRight: false, UITheme.InfoIconSprite());
+            GameObject chatHudPanel = CreateHudTextPanel(hudCanvas.transform, atRight: true, out Text chatHudText, out ScrollRect chatHudScrollRect);
+            chatHudText.text = "(noch keine Fragen gestellt)";
+            GameObject metadataOverlay = CreateHudTextPanel(hudCanvas.transform, atRight: false, out Text metadataText, out _);
+            metadataText.text = "(kein Volumen geladen)";
 
             var volumeGO = GameObject.Find("Volume");
             VolumeView volumeView = volumeGO != null ? volumeGO.GetComponent<VolumeView>() : null;
@@ -278,11 +303,29 @@ namespace BioimageVR.EditorSetup
             renderControlsSo.FindProperty("channel2Label").objectReferenceValue = channel2Label;
             renderControlsSo.ApplyModifiedProperties();
 
+            SegmentationControls segmentationControls = canvasGO.AddComponent<SegmentationControls>();
+            var segmentationSo = new SerializedObject(segmentationControls);
+            segmentationSo.FindProperty("volumeView").objectReferenceValue = volumeView;
+            segmentationSo.FindProperty("toggleButton").objectReferenceValue = segmentationButton;
+            segmentationSo.FindProperty("toggleLabel").objectReferenceValue = segmentationLabel;
+            segmentationSo.FindProperty("row").objectReferenceValue = segmentationButton.transform.parent.gameObject;
+            segmentationSo.ApplyModifiedProperties();
+
             ChatPanel chatPanel = canvasGO.AddComponent<ChatPanel>();
             var chatSo = new SerializedObject(chatPanel);
             chatSo.FindProperty("contentText").objectReferenceValue = chatContentText;
             chatSo.FindProperty("scrollRect").objectReferenceValue = chatScrollRect;
+            chatSo.FindProperty("secondaryContentText").objectReferenceValue = chatHudText;
+            chatSo.FindProperty("secondaryScrollRect").objectReferenceValue = chatHudScrollRect;
             chatSo.ApplyModifiedProperties();
+
+            // chat-icon togglet sein hud-fenster direkt, ohne ueber SidePanelController zu
+            // gehen (das side panel selbst bleibt unangetastet, egal ob offen/zu/weit weg)
+            PanelToggleButton chatHudToggle = canvasGO.AddComponent<PanelToggleButton>();
+            var chatHudToggleSo = new SerializedObject(chatHudToggle);
+            chatHudToggleSo.FindProperty("button").objectReferenceValue = chatShortcutButton;
+            chatHudToggleSo.FindProperty("panelGO").objectReferenceValue = chatHudPanel;
+            chatHudToggleSo.ApplyModifiedProperties();
 
             IdrClient idrClient = canvasGO.AddComponent<IdrClient>();
             if (!string.IsNullOrEmpty(preservedServerBaseUrl))
@@ -298,6 +341,28 @@ namespace BioimageVR.EditorSetup
             gallerySo.FindProperty("listContainer").objectReferenceValue = galleryContent;
             gallerySo.FindProperty("idrClient").objectReferenceValue = idrClient;
             gallerySo.ApplyModifiedProperties();
+
+            VolumeMetadataPanel metadataPanel = canvasGO.AddComponent<VolumeMetadataPanel>();
+            var metadataPanelSo = new SerializedObject(metadataPanel);
+            metadataPanelSo.FindProperty("volumeView").objectReferenceValue = volumeView;
+            metadataPanelSo.FindProperty("infoButton").objectReferenceValue = infoButton;
+            metadataPanelSo.FindProperty("panelGO").objectReferenceValue = metadataOverlay;
+            metadataPanelSo.FindProperty("metadataText").objectReferenceValue = metadataText;
+            metadataPanelSo.ApplyModifiedProperties();
+
+            // mess knoepfe unten mittig im hud, tool selbst haengt am volume
+            CreateMeasureToolbar(hudCanvas.transform, out Button rulerButton, out Button blobButton, out Text measureHint);
+            MeasureTool measureTool = EnsureMeasureTool(volumeView);
+            MeasureToolbar measureToolbar = canvasGO.AddComponent<MeasureToolbar>();
+            var measureToolbarSo = new SerializedObject(measureToolbar);
+            measureToolbarSo.FindProperty("measureTool").objectReferenceValue = measureTool;
+            measureToolbarSo.FindProperty("rulerButton").objectReferenceValue = rulerButton;
+            measureToolbarSo.FindProperty("blobButton").objectReferenceValue = blobButton;
+            measureToolbarSo.FindProperty("hintText").objectReferenceValue = measureHint;
+            measureToolbarSo.ApplyModifiedProperties();
+
+            CreateAxisGizmo(cam, volumeView != null ? volumeView.transform : null);
+            CreateScaleBar(cam, volumeView);
 
             SidePanelController controller = canvasGO.AddComponent<SidePanelController>();
             var controllerSo = new SerializedObject(controller);
@@ -376,6 +441,12 @@ namespace BioimageVR.EditorSetup
 
         private const float DragBarGap = 10f;
         private const float HeaderHeight = 90f;
+
+        // ScrollRect.scrollSensitivity multipliziert direkt den rohen stick-wert
+        // (-1..1, EnsureHandRay.scrollAction) - unitys default (1) ist fuers ruckartige
+        // mausrad-ticks gedacht, bei kontinuierlichem analogem stick-halten fuehlt sich
+        // das viel zu langsam an, deshalb deutlich hoeher
+        private const float StickScrollSensitivity = 25f;
         private const float ContentGap = 20f;
         private const float CloseButtonReserve = 44f; // platz rechts auf der DragBar fuer den X button
         private const float ContrastRowGap = 10f;
@@ -522,6 +593,7 @@ namespace BioimageVR.EditorSetup
             colors.normalColor = new Color(1f, 1f, 1f, 0f);
             colors.highlightedColor = UITheme.SurfaceHover;
             colors.pressedColor = UITheme.SurfacePressed;
+            colors.selectedColor = colors.normalColor;
             colors.fadeDuration = 0.08f;
             button.colors = colors;
 
@@ -543,6 +615,256 @@ namespace BioimageVR.EditorSetup
             }
 
             return button;
+        }
+
+        // meter vor der kamera, meter unter augenhoehe, canvas-groesse in ui-einheiten,
+        // skala ui-einheiten -> meter (gleiche konvention wie LocalOffset/0.00085f beim
+        // side panel) - alle vier bewusst als eigene konstanten, muss vermutlich einmal
+        // live im headset nachjustiert werden, kein weg das von hier aus blind exakt zu
+        // treffen. hoeher/breiter als frueher (war nur ein duenner streifen fuer die
+        // beiden icons) - traegt jetzt zusaetzlich die chat/info hud-fenster (siehe
+        // CreateHudTextPanel), untere kante bewusst an der alten icon-position gehalten
+        // (HudVerticalOffset entsprechend nachgerechnet), damit die icons an derselben
+        // stelle bleiben und nur nach oben hin platz fuer die fenster dazukommt
+        private const float HudDistance = 0.9f;
+        private const float HudVerticalOffset = -0.05f;
+        private const float HudWidth = 900f;
+        private const float HudHeight = 760f;
+        private const float HudScale = 0.00085f;
+        private const float HudPanelMargin = 16f;
+        private const float HudPanelGap = 16f; // luecke zwischen den beiden hud-fenstern
+        // platz unter jedem hud-fenster fuer das zugehoerige ecken-icon (64 + 2*16 rand),
+        // sonst ueberlappen sich fenster und knopf
+        private const float HudPanelBottomGap = 96f;
+
+        // eigene, kopf-fixierte canvas-ebene, direktes kind der kamera statt der
+        // grabbaren SideCanvas - dadurch bewegt/dreht sie sich automatisch mit jedem
+        // frame 1:1 mit dem kopf mit, kein eigenes Update()-skript noetig (die kamera
+        // selbst wird schon jeden frame vom xr-tracking bewegt, ein kind folgt davon
+        // automatisch). traegt nur die beiden ecken-icons, siehe kommentar an der
+        // aufrufstelle warum der eigentliche metadaten-inhalt NICHT hier drauf liegt
+        private static Canvas CreateHud(Camera cam)
+        {
+            var existingHud = GameObject.Find("HudCanvas");
+            if (existingHud != null) Object.DestroyImmediate(existingHud);
+
+            var hudGO = new GameObject("HudCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(TrackedDeviceGraphicRaycaster));
+            var hudCanvas = hudGO.GetComponent<Canvas>();
+            hudCanvas.renderMode = RenderMode.WorldSpace;
+
+            var hudRect = hudGO.GetComponent<RectTransform>();
+            hudRect.sizeDelta = new Vector2(HudWidth, HudHeight);
+
+            if (cam != null)
+            {
+                hudCanvas.worldCamera = cam;
+                hudGO.transform.SetParent(cam.transform, false);
+                hudGO.transform.localPosition = new Vector3(0f, HudVerticalOffset, HudDistance);
+                hudGO.transform.localRotation = Quaternion.identity;
+                hudGO.transform.localScale = Vector3.one * HudScale;
+            }
+            else
+            {
+                Debug.LogWarning("BioimageVR: keine Kamera gefunden - HUD-Icons bleiben an fester Weltposition statt der Kamera zu folgen.");
+            }
+
+            return hudCanvas;
+        }
+
+        // x/y/z orientierungs-gizmo, kamera-fixiert unten links im sichtfeld (22.09.
+        // wunsch: soll nicht am volumen selbst haengen, sondern immer an derselben
+        // stelle im blick bleiben, egal wie das volumen gerade rotiert ist). weiter
+        // aussen/tiefer positioniert als der HUD-canvas + Info-icon (siehe CreateHud/
+        // CreateCornerIcon), damit sich beides nicht ueberlappt - position/scale sind
+        // eine erste schaetzung, ggf. live im inspector nachjustieren
+        private static void CreateAxisGizmo(Camera cam, Transform volumeTransform)
+        {
+            var existing = GameObject.Find("AxisGizmo");
+            if (existing != null) Object.DestroyImmediate(existing);
+            if (cam == null) return;
+
+            var anchorGO = new GameObject("AxisGizmo");
+            anchorGO.transform.SetParent(cam.transform, false);
+            anchorGO.transform.localPosition = new Vector3(-0.15f, -0.32f, 0.9f);
+            anchorGO.transform.localScale = Vector3.one * 0.07f;
+
+            CreateAxisLabel(anchorGO.transform, "X", new Vector3(1f, 0f, 0f), new Color(1f, 0.35f, 0.35f));
+            CreateAxisLabel(anchorGO.transform, "Y", new Vector3(0f, 1f, 0f), new Color(0.4f, 1f, 0.4f));
+            CreateAxisLabel(anchorGO.transform, "Z", new Vector3(0f, 0f, 1f), new Color(0.4f, 0.6f, 1f));
+
+            VolumeAxisLabels axisLabels = anchorGO.AddComponent<VolumeAxisLabels>();
+            var so = new SerializedObject(axisLabels);
+            so.FindProperty("volumeTransform").objectReferenceValue = volumeTransform;
+            so.ApplyModifiedProperties();
+        }
+
+        // achsen-pfeil aus echter 3d-geometrie (zylinder-schaft + etwas dickerer,
+        // kurzer zylinder als spitze - unity hat keine cone-primitive, das ist die
+        // naeherung) statt eines kamera-ausgerichteten LineRenderers: der sah aus
+        // jedem winkel wie eine flache karte statt wie ein pfeil aus, weil
+        // LineAlignment.View ihn immer als 2d-flaeche zur kamera dreht (22.09.
+        // feedback "das sind leider Ebenen")
+        private static void CreateAxisLabel(Transform parent, string text, Vector3 direction, Color color)
+        {
+            Quaternion rot = Quaternion.FromToRotation(Vector3.up, direction.normalized);
+            float shaftLength = direction.magnitude * 0.8f;
+            float tipLength = direction.magnitude * 0.2f;
+
+            var shaft = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            shaft.name = $"AxisArrow_{text}_Shaft";
+            Object.DestroyImmediate(shaft.GetComponent<Collider>());
+            shaft.transform.SetParent(parent, false);
+            shaft.transform.localPosition = direction.normalized * (shaftLength / 2f);
+            shaft.transform.localRotation = rot;
+            shaft.transform.localScale = new Vector3(0.05f, shaftLength / 2f, 0.05f);
+            ApplyUnlitColor(shaft, color);
+
+            var tip = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            tip.name = $"AxisArrow_{text}_Tip";
+            Object.DestroyImmediate(tip.GetComponent<Collider>());
+            tip.transform.SetParent(parent, false);
+            tip.transform.localPosition = direction.normalized * (shaftLength + tipLength / 2f);
+            tip.transform.localRotation = rot;
+            tip.transform.localScale = new Vector3(0.12f, tipLength / 2f, 0.12f);
+            ApplyUnlitColor(tip, color);
+
+            var go = new GameObject($"AxisLabel_{text}", typeof(TextMesh));
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = direction * 1.15f;
+            go.transform.localScale = new Vector3(0.7f, 1f, 1f); // etwas schmalere buchstaben
+
+            var textMesh = go.GetComponent<TextMesh>();
+            textMesh.text = text;
+            textMesh.color = color;
+            textMesh.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            textMesh.GetComponent<MeshRenderer>().sharedMaterial = textMesh.font.material;
+            textMesh.anchor = TextAnchor.MiddleCenter;
+            textMesh.alignment = TextAlignment.Center;
+            textMesh.fontStyle = FontStyle.Bold;
+
+            go.AddComponent<BillboardText>();
+        }
+
+        private static void ApplyUnlitColor(GameObject go, Color color)
+        {
+            var mat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+            mat.SetColor("_BaseColor", color);
+            go.GetComponent<Renderer>().sharedMaterial = mat;
+        }
+
+        // ecken-icons unten links/rechts (Punkt 5+11 der wunschliste, STATUS.md 25./26.08.) -
+        // zusaetzlich zum hamburger-menu, nicht als ersatz: direkter ein-klick-zugriff
+        // statt erst das ausklapp-menu oeffnen zu muessen. echte vektor-icons
+        // (UITheme.ChatIconSprite/InfoIconSprite) statt text-glyphen ("i"/"..."),
+        // gleiches erzeugungsprinzip wie RoundedSprite (per-pixel alpha-maske)
+        private static Button CreateCornerIcon(Transform parent, bool atRight, Sprite iconSprite)
+        {
+            const float size = 64f;
+            const float margin = 16f;
+            const float iconPadding = 14f;
+
+            var buttonGO = new GameObject(atRight ? "ChatShortcutButton" : "InfoButton", typeof(Image), typeof(Button));
+            buttonGO.transform.SetParent(parent, false);
+            var buttonRect = buttonGO.GetComponent<RectTransform>();
+            buttonRect.anchorMin = buttonRect.anchorMax = new Vector2(atRight ? 1f : 0f, 0f);
+            buttonRect.pivot = new Vector2(atRight ? 1f : 0f, 0f);
+            buttonRect.anchoredPosition = new Vector2(atRight ? -margin : margin, margin);
+            buttonRect.sizeDelta = new Vector2(size, size);
+
+            var buttonImage = buttonGO.GetComponent<Image>();
+            buttonImage.sprite = UITheme.RoundedSprite((int)(size / 2f));
+            buttonImage.type = Image.Type.Sliced;
+            buttonImage.color = Color.white;
+
+            var button = buttonGO.GetComponent<Button>();
+            button.targetGraphic = buttonImage;
+            var colors = button.colors;
+            colors.normalColor = UITheme.Surface;
+            colors.highlightedColor = UITheme.SurfaceHover;
+            colors.pressedColor = UITheme.SurfacePressed;
+            colors.selectedColor = colors.normalColor;
+            colors.fadeDuration = 0.08f;
+            button.colors = colors;
+
+            var iconGO = new GameObject("Icon", typeof(Image));
+            iconGO.transform.SetParent(buttonGO.transform, false);
+            var iconRect = iconGO.GetComponent<RectTransform>();
+            iconRect.anchorMin = Vector2.zero;
+            iconRect.anchorMax = Vector2.one;
+            iconRect.offsetMin = new Vector2(iconPadding, iconPadding);
+            iconRect.offsetMax = new Vector2(-iconPadding, -iconPadding);
+            var iconImage = iconGO.GetComponent<Image>();
+            iconImage.sprite = iconSprite;
+            iconImage.color = UITheme.TextPrimary;
+            iconImage.preserveAspect = true;
+            iconImage.raycastTarget = false;
+
+            return button;
+        }
+
+        // eigenstaendiges, scrollbares text-fenster im HUD, ueber dem jeweiligen
+        // ecken-icon (chat rechts, info links) - getoggelt vom icon-klick (siehe
+        // PanelToggleButton bzw. VolumeMetadataPanel.Toggle), bleibt dadurch IMMER an
+        // seinem knopf, unabhaengig davon wo/ob das greifbare seitenpanel gerade sichtbar
+        // ist (Eric's wunsch: "nicht zum panel schauen muessen"). initial inaktiv, gleicher
+        // scroll-aufbau wie CreateChatPage, nur schmaler (halbe hud-breite je fenster)
+        private static GameObject CreateHudTextPanel(Transform hudParent, bool atRight, out Text contentText, out ScrollRect scrollRect)
+        {
+            var panelGO = new GameObject(atRight ? "ChatHudPanel" : "InfoHudPanel", typeof(Image));
+            panelGO.transform.SetParent(hudParent, false);
+            var panelRect = panelGO.GetComponent<RectTransform>();
+            panelRect.anchorMin = new Vector2(atRight ? 0.5f : 0f, 0f);
+            panelRect.anchorMax = new Vector2(atRight ? 1f : 0.5f, 1f);
+            panelRect.offsetMin = new Vector2(atRight ? HudPanelGap / 2f : HudPanelMargin, HudPanelBottomGap);
+            panelRect.offsetMax = new Vector2(atRight ? -HudPanelMargin : -HudPanelGap / 2f, -HudPanelMargin);
+            var panelImage = panelGO.GetComponent<Image>();
+            panelImage.sprite = UITheme.RoundedSprite(20);
+            panelImage.type = Image.Type.Sliced;
+            panelImage.color = UITheme.Background;
+            panelImage.raycastTarget = true; // schluckt klicks/strahl, nichts dahinter soll mitklicken
+
+            var scrollGO = new GameObject("ScrollView", typeof(ScrollRect));
+            scrollGO.transform.SetParent(panelGO.transform, false);
+            var scrollViewRect = scrollGO.GetComponent<RectTransform>();
+            scrollViewRect.anchorMin = Vector2.zero;
+            scrollViewRect.anchorMax = Vector2.one;
+            scrollViewRect.offsetMin = new Vector2(16f, 16f);
+            scrollViewRect.offsetMax = new Vector2(-16f, -16f);
+
+            var viewportGO = new GameObject("Viewport", typeof(Image), typeof(RectMask2D));
+            viewportGO.transform.SetParent(scrollGO.transform, false);
+            EditorSetupCommon.StretchFull(viewportGO.GetComponent<RectTransform>());
+            viewportGO.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.001f);
+            viewportGO.GetComponent<Image>().raycastTarget = false;
+
+            var contentGO = new GameObject("Content", typeof(Text), typeof(ContentSizeFitter));
+            contentGO.transform.SetParent(viewportGO.transform, false);
+            var contentRect = contentGO.GetComponent<RectTransform>();
+            contentRect.anchorMin = new Vector2(0f, 1f);
+            contentRect.anchorMax = new Vector2(1f, 1f);
+            contentRect.pivot = new Vector2(0.5f, 1f);
+            contentRect.sizeDelta = new Vector2(0f, 0f);
+            contentGO.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+            contentText = contentGO.GetComponent<Text>();
+            contentText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            contentText.fontSize = 20;
+            contentText.color = UITheme.TextSecondary;
+            contentText.alignment = TextAnchor.UpperLeft;
+            contentText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            contentText.verticalOverflow = VerticalWrapMode.Overflow;
+            contentText.supportRichText = true;
+
+            scrollRect = scrollGO.GetComponent<ScrollRect>();
+            scrollRect.horizontal = false;
+            scrollRect.vertical = true;
+            scrollRect.movementType = ScrollRect.MovementType.Clamped;
+            scrollRect.viewport = viewportGO.GetComponent<RectTransform>();
+            scrollRect.content = contentRect;
+            scrollRect.scrollSensitivity = StickScrollSensitivity;
+
+            panelGO.SetActive(false);
+            return panelGO;
         }
 
         // linkes ausklapp-menu wie bei handy-apps, ersetzt den frueheren zyklischen
@@ -628,6 +950,7 @@ namespace BioimageVR.EditorSetup
             colors.normalColor = UITheme.Surface;
             colors.highlightedColor = UITheme.SurfaceHover;
             colors.pressedColor = UITheme.SurfacePressed;
+            colors.selectedColor = colors.normalColor;
             colors.fadeDuration = 0.08f;
             button.colors = colors;
             return button;
@@ -765,6 +1088,7 @@ namespace BioimageVR.EditorSetup
             scrollRect.vertical = true;
             scrollRect.movementType = ScrollRect.MovementType.Clamped;
             scrollRect.viewport = viewportGO.GetComponent<RectTransform>();
+            scrollRect.scrollSensitivity = StickScrollSensitivity;
             scrollRect.content = contentRect;
 
             return pageGO;
@@ -813,6 +1137,7 @@ namespace BioimageVR.EditorSetup
             scrollRect.vertical = true;
             scrollRect.movementType = ScrollRect.MovementType.Clamped;
             scrollRect.viewport = viewportGO.GetComponent<RectTransform>();
+            scrollRect.scrollSensitivity = StickScrollSensitivity;
             scrollRect.content = contentRect;
 
             listContainer = contentRect;
@@ -840,7 +1165,8 @@ namespace BioimageVR.EditorSetup
             out Button shadingButton, out Text shadingLabel,
             out Button channel0Button, out Text channel0Label,
             out Button channel1Button, out Text channel1Label,
-            out Button channel2Button, out Text channel2Label)
+            out Button channel2Button, out Text channel2Label,
+            out Button segmentationButton, out Text segmentationLabel)
         {
             var pageGO = new GameObject("SettingsPage");
             pageGO.transform.SetParent(parent, false);
@@ -883,6 +1209,7 @@ namespace BioimageVR.EditorSetup
             scrollRect.vertical = true;
             scrollRect.movementType = ScrollRect.MovementType.Clamped;
             scrollRect.viewport = viewportGO.GetComponent<RectTransform>();
+            scrollRect.scrollSensitivity = StickScrollSensitivity;
             scrollRect.content = contentRect;
 
             densitySlider = CreateSettingsSliderRow(contentGO.transform, "Density", 0.01f, 5f, 1f);
@@ -895,6 +1222,8 @@ namespace BioimageVR.EditorSetup
             channel0Button = CreateSettingsToggleRow(contentGO.transform, "Kanal 1", out channel0Label, ChannelAccentColors[0]);
             channel1Button = CreateSettingsToggleRow(contentGO.transform, "Kanal 2", out channel1Label, ChannelAccentColors[1]);
             channel2Button = CreateSettingsToggleRow(contentGO.transform, "Kanal 3", out channel2Label, ChannelAccentColors[2]);
+            // zeile blendet sich selbst aus wenn das bild keine maske hat, SegmentationControls
+            segmentationButton = CreateSettingsToggleRow(contentGO.transform, "Segmentierung", out segmentationLabel);
 
             return pageGO;
         }
@@ -1004,9 +1333,20 @@ namespace BioimageVR.EditorSetup
             var button = buttonGO.GetComponent<Button>();
             button.targetGraphic = buttonImage;
             var colors = button.colors;
-            colors.normalColor = new Color(baseColor.r, baseColor.g, baseColor.b, accentColor.HasValue ? 0.35f : UITheme.AccentSoft.a);
-            colors.highlightedColor = baseColor * new Color(1f, 1f, 1f, 0.35f);
-            colors.pressedColor = baseColor * new Color(1f, 1f, 1f, 0.55f);
+            float normalAlpha = accentColor.HasValue ? 0.35f : UITheme.AccentSoft.a;
+            colors.normalColor = new Color(baseColor.r, baseColor.g, baseColor.b, normalAlpha);
+            // relativ zu normalAlpha statt fixer multiplikator - vorher landete
+            // highlightedColor durch baseColor*0.35 zufaellig auf derselben alpha wie
+            // normalColor (deckte sich bei den kanal-knoepfen exakt), dadurch war beim
+            // hover ueberhaupt kein unterschied sichtbar (22.09. wunsch: hover-highlight
+            // fuer die kanal-knoepfe)
+            colors.highlightedColor = new Color(baseColor.r, baseColor.g, baseColor.b, Mathf.Min(normalAlpha + 0.3f, 1f));
+            colors.pressedColor = new Color(baseColor.r, baseColor.g, baseColor.b, Mathf.Min(normalAlpha + 0.5f, 1f));
+            // ohne das haengt der button nach dem klicken dauerhaft in unitys default
+            // selectedColor (deckendes weiss) fest, statt kurz aufzublitzen und zurueck
+            // zur normalfarbe zu gehen - das war der "kanal buttons werden komplett
+            // weiss" bug
+            colors.selectedColor = colors.normalColor;
             colors.fadeDuration = 0.08f;
             button.colors = colors;
 
@@ -1047,6 +1387,204 @@ namespace BioimageVR.EditorSetup
             var so = new SerializedObject(volumeZoom);
             so.FindProperty("rightHandRay").objectReferenceValue = rightHandRay;
             so.ApplyModifiedProperties();
+        }
+
+        // VolumeRotate existiert anders als VolumeZoom noch nicht in der szene (neues
+        // feature), deshalb hier per AddComponent nachtragen statt nur zu verkabeln
+        private static void WireVolumeRotate(XRRayInteractor leftHandRay)
+        {
+            var volumeView = Object.FindFirstObjectByType<VolumeView>();
+            if (volumeView == null) return;
+            var volumeRotate = volumeView.GetComponent<VolumeRotate>();
+            if (volumeRotate == null) volumeRotate = volumeView.gameObject.AddComponent<VolumeRotate>();
+            if (leftHandRay == null) return;
+            var so = new SerializedObject(volumeRotate);
+            so.FindProperty("leftHandRay").objectReferenceValue = leftHandRay;
+            so.ApplyModifiedProperties();
+        }
+
+        private static MeasureTool EnsureMeasureTool(VolumeView volumeView)
+        {
+            if (volumeView == null) return null;
+            var tool = volumeView.GetComponent<MeasureTool>();
+            if (tool == null) tool = volumeView.gameObject.AddComponent<MeasureTool>();
+            return tool;
+        }
+
+        // messtool, modus kommt aus der hud toolbar, X oder A misst
+        // linienmaterial hier im editor erzeugen, landet so mit in der szene
+        private static void WireMeasureTool(XRRayInteractor leftHandRay, XRRayInteractor rightHandRay)
+        {
+            MeasureTool tool = EnsureMeasureTool(Object.FindFirstObjectByType<VolumeView>());
+            if (tool == null) return;
+            var so = new SerializedObject(tool);
+            if (so.FindProperty("lineMaterial").objectReferenceValue == null)
+                so.FindProperty("lineMaterial").objectReferenceValue = new Material(Shader.Find("Sprites/Default")) { name = "MeasureLine" };
+            so.FindProperty("accentColor").colorValue = UITheme.Accent;
+            if (leftHandRay != null) so.FindProperty("leftHandRay").objectReferenceValue = leftHandRay;
+            if (rightHandRay != null) so.FindProperty("rightHandRay").objectReferenceValue = rightHandRay;
+            so.ApplyModifiedProperties();
+        }
+
+        // Lineal mittig zwischen info und chat icon, Auto rechts daneben
+        // Auto startet versteckt, MeasureToolbar blendet es ein
+        // Lineal bleibt fest stehen damit es beim einblenden nicht unterm strahl wegspringt
+        // hinweis zeile direkt darueber, unter den hud fenstern
+        private static void CreateMeasureToolbar(Transform hudParent, out Button rulerButton, out Button blobButton, out Text hintText)
+        {
+            const float buttonWidth = 150f;
+            const float buttonHeight = 52f;
+            const float gap = 12f;
+            const float bottomMargin = 18f;
+
+            rulerButton = CreateMeasureButton(hudParent, "Lineal", 0f, bottomMargin, buttonWidth, buttonHeight);
+            blobButton = CreateMeasureButton(hudParent, "Auto", buttonWidth + gap, bottomMargin, buttonWidth, buttonHeight);
+            blobButton.gameObject.SetActive(false);
+
+            var hintGO = new GameObject("MeasureHint", typeof(Text));
+            hintGO.transform.SetParent(hudParent, false);
+            var hintRect = hintGO.GetComponent<RectTransform>();
+            hintRect.anchorMin = hintRect.anchorMax = new Vector2(0.5f, 0f);
+            hintRect.pivot = new Vector2(0.5f, 0f);
+            hintRect.anchoredPosition = new Vector2(0f, bottomMargin + buttonHeight + 4f);
+            hintRect.sizeDelta = new Vector2(600f, 26f);
+            hintText = hintGO.GetComponent<Text>();
+            hintText.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            hintText.fontSize = 20;
+            hintText.color = UITheme.TextPrimary;
+            hintText.alignment = TextAnchor.MiddleCenter;
+            hintText.raycastTarget = false;
+            hintGO.SetActive(false);
+        }
+
+        private static Button CreateMeasureButton(Transform parent, string labelText, float centerX, float bottom, float width, float height)
+        {
+            var buttonGO = new GameObject($"Measure{labelText}Button", typeof(Image), typeof(Button));
+            buttonGO.transform.SetParent(parent, false);
+            var rect = buttonGO.GetComponent<RectTransform>();
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0f);
+            rect.pivot = new Vector2(0.5f, 0f);
+            rect.anchoredPosition = new Vector2(centerX, bottom);
+            rect.sizeDelta = new Vector2(width, height);
+
+            var image = buttonGO.GetComponent<Image>();
+            image.sprite = UITheme.RoundedSprite((int)(height / 2f));
+            image.type = Image.Type.Sliced;
+            image.color = Color.white;
+
+            var button = buttonGO.GetComponent<Button>();
+            button.targetGraphic = image;
+            var colors = button.colors;
+            colors.normalColor = UITheme.Surface;
+            colors.highlightedColor = UITheme.SurfaceHover;
+            colors.pressedColor = UITheme.SurfacePressed;
+            colors.selectedColor = colors.normalColor;
+            colors.fadeDuration = 0.08f;
+            button.colors = colors;
+
+            var labelGO = new GameObject("Label", typeof(Text));
+            labelGO.transform.SetParent(buttonGO.transform, false);
+            var labelRect = labelGO.GetComponent<RectTransform>();
+            labelRect.anchorMin = Vector2.zero;
+            labelRect.anchorMax = Vector2.one;
+            labelRect.offsetMin = labelRect.offsetMax = Vector2.zero;
+            var label = labelGO.GetComponent<Text>();
+            label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            label.fontSize = 22;
+            label.fontStyle = FontStyle.Bold;
+            label.color = UITheme.TextPrimary;
+            label.alignment = TextAnchor.MiddleCenter;
+            label.raycastTarget = false;
+            label.text = labelText;
+
+            return button;
+        }
+
+        // massstabsbalken im kartenstil, kamera-fixiert unten/dezent (23.09. wunsch #2 -
+        // erste version haengte am volumen mit fester realer laenge, wurde beim
+        // reinzoomen riesig). balkenlaenge bleibt fix, nur die beschriftung aendert
+        // sich live beim zoomen (VolumeScaleBar.Refresh)
+        private static void CreateScaleBar(Camera cam, VolumeView volumeView)
+        {
+            var existing = GameObject.Find("ScaleBarHud");
+            if (existing != null) Object.DestroyImmediate(existing);
+
+            // rest von der alten version, die noch direkt am Volume haengte (vor dem
+            // umbau auf den kamera-fixierten hud-anker) - nie aufgeraeumt
+            if (volumeView != null)
+            {
+                var staleScaleBar = volumeView.GetComponent<VolumeScaleBar>();
+                if (staleScaleBar != null) Object.DestroyImmediate(staleScaleBar);
+            }
+
+            if (cam == null || volumeView == null) return;
+
+            const float barLength = 0.12f;
+            const int segments = 4;
+            const float barThickness = 0.006f;
+            const float tickHeight = 0.018f;
+            float segmentLength = barLength / segments;
+
+            var anchorGO = new GameObject("ScaleBarHud");
+            anchorGO.transform.SetParent(cam.transform, false);
+            anchorGO.transform.localPosition = new Vector3(0f, -0.42f, 0.9f);
+
+            // abwechselnd hell/dunkel gefaerbte segmente statt einem einzelnen strich -
+            // "zebra"-massstab wie in kartografie-tools ueblich (23.09. wunsch), macht
+            // die aktuelle zoomstufe auf einen blick greifbarer als nur eine zahl
+            for (int i = 0; i < segments; i++)
+            {
+                var seg = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                seg.name = $"ScaleBarSegment{i}";
+                Object.DestroyImmediate(seg.GetComponent<Collider>());
+                seg.transform.SetParent(anchorGO.transform, false);
+                float segCenter = -barLength / 2f + segmentLength * (i + 0.5f);
+                seg.transform.localPosition = new Vector3(segCenter, 0f, 0f);
+                seg.transform.localScale = new Vector3(segmentLength, barThickness, barThickness);
+                ApplyUnlitColor(seg, i % 2 == 0 ? Color.white : new Color(0.15f, 0.15f, 0.15f));
+            }
+
+            // tick-striche an jeder segmentgrenze (0/25/50/75/100%)
+            for (int i = 0; i <= segments; i++)
+            {
+                var tick = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                tick.name = $"ScaleBarTick{i}";
+                Object.DestroyImmediate(tick.GetComponent<Collider>());
+                tick.transform.SetParent(anchorGO.transform, false);
+                float x = -barLength / 2f + segmentLength * i;
+                tick.transform.localPosition = new Vector3(x, tickHeight / 2f - barThickness / 2f, 0f);
+                tick.transform.localScale = new Vector3(barThickness, tickHeight, barThickness);
+                ApplyUnlitColor(tick, Color.white);
+            }
+
+            // "0" links, statisch - der eigentliche wert rechts aendert sich live beim zoomen
+            CreateScaleBarLabel(anchorGO.transform, "0", new Vector3(-barLength / 2f, -0.025f, 0f));
+            TextMesh label = CreateScaleBarLabel(anchorGO.transform, "", new Vector3(barLength / 2f, -0.025f, 0f));
+
+            VolumeScaleBar scaleBar = anchorGO.AddComponent<VolumeScaleBar>();
+            var so = new SerializedObject(scaleBar);
+            so.FindProperty("volumeTransform").objectReferenceValue = volumeView.transform;
+            so.FindProperty("volumeView").objectReferenceValue = volumeView;
+            so.FindProperty("label").objectReferenceValue = label;
+            so.FindProperty("barWorldLength").floatValue = barLength;
+            so.ApplyModifiedProperties();
+        }
+
+        private static TextMesh CreateScaleBarLabel(Transform parent, string text, Vector3 localPos)
+        {
+            var labelGO = new GameObject($"ScaleBarLabel_{(string.IsNullOrEmpty(text) ? "Value" : text)}", typeof(TextMesh));
+            labelGO.transform.SetParent(parent, false);
+            labelGO.transform.localPosition = localPos;
+            labelGO.transform.localScale = new Vector3(0.014f, 0.02f, 0.02f);
+            var label = labelGO.GetComponent<TextMesh>();
+            label.text = text;
+            label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            labelGO.GetComponent<MeshRenderer>().sharedMaterial = label.font.material;
+            label.color = Color.white;
+            label.anchor = TextAnchor.MiddleCenter;
+            label.alignment = TextAlignment.Center;
+            label.fontStyle = FontStyle.Bold;
+            return label;
         }
     }
 }

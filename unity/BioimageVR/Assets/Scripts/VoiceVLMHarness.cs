@@ -147,7 +147,7 @@ namespace BioimageVR
             // frame warten, sonst landet der statustext im screenshot
             yield return null;
             yield return new WaitForEndOfFrame();
-            Texture2D screenshot = ScreenCapture.CaptureScreenshotAsTexture();
+            Texture2D screenshot = SceneScreenshot.Capture(Camera.main);
 
             SetStatus($"Frage: \"{question}\" - frage das VLM ...");
             vlmClient.AskAboutImage(screenshot, question, context, VLMToolDispatcher.Tools,

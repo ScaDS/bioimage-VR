@@ -15,6 +15,8 @@ namespace BioimageVR
         {
             public string Path;
             public string DisplayName;
+            // leer wenn keine vorschau daneben liegt (siehe fetch_from_idr.thumbnail_path_for)
+            public string ThumbnailPath;
         }
 
         [Serializable] private class Metadata { public string name; public int image_id; }
@@ -32,11 +34,28 @@ namespace BioimageVR
                 paths.AddRange(Directory.GetFiles(dataRoot, "*.nii.gz", SearchOption.AllDirectories));
 #endif
 
+            // masken gehoeren zu einem bild, keine eigenen galerie eintraege
             var entries = paths
+                .Where(p => !p.EndsWith("_labels.nii.gz", StringComparison.OrdinalIgnoreCase))
                 .OrderBy(p => p)
-                .Select(p => new Entry { Path = p, DisplayName = ResolveDisplayName(p) })
+                .Select(p => new Entry
+                {
+                    Path = p,
+                    DisplayName = ResolveDisplayName(p),
+                    ThumbnailPath = ResolveThumbnailPath(p)
+                })
                 .ToList();
             return entries;
+        }
+
+        // <name>_thumbnail.jpg statt fix "thumbnail.jpg" (siehe fetch_from_idr.
+        // thumbnail_path_for) - kollisionsfrei falls mehrere volumen im selben ordner
+        // liegen, z.b. flach in persistentDataPath auf android
+        private static string ResolveThumbnailPath(string volumePath)
+        {
+            string stem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(volumePath));
+            string thumbnailPath = Path.Combine(Path.GetDirectoryName(volumePath) ?? "", $"{stem}_thumbnail.jpg");
+            return File.Exists(thumbnailPath) ? thumbnailPath : "";
         }
 
         // sucht ein metadata.json daneben (siehe fetch_from_idr.py), sonst nur dateiname

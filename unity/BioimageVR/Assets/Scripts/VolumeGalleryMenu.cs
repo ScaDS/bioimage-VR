@@ -1,6 +1,8 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.Networking;
 using UnityEngine.UI;
 
 namespace BioimageVR
@@ -28,7 +30,6 @@ namespace BioimageVR
         private int? idrDatasetId;
         private string idrDatasetName;
         private int idrOffset;
-        private int idrTotal;
         private const int IdrPageSize = 30;
 
         private void Start()
@@ -85,6 +86,7 @@ namespace BioimageVR
             colors.normalColor = active ? UITheme.AccentSoft : UITheme.Surface;
             colors.highlightedColor = UITheme.SurfaceHover;
             colors.pressedColor = UITheme.SurfacePressed;
+            colors.selectedColor = colors.normalColor;
             colors.fadeDuration = 0.08f;
             button.colors = colors;
         }
@@ -125,7 +127,13 @@ namespace BioimageVR
             image.type = Image.Type.Sliced;
             image.color = Color.white; // colorblock unten setzt die eigentliche farbe
 
-            CreateLabel(entry.DisplayName, rowGO.transform);
+            bool hasThumbnail = !string.IsNullOrEmpty(entry.ThumbnailPath);
+            if (hasThumbnail)
+            {
+                RawImage thumbnail = CreateThumbnail(rowGO.transform);
+                StartCoroutine(LoadThumbnailCoroutine(thumbnail, "file:///" + entry.ThumbnailPath.Replace('\\', '/')));
+            }
+            CreateLabel(entry.DisplayName, rowGO.transform, hasThumbnail ? ThumbnailLabelOffset : DefaultLabelOffset);
 
             var button = rowGO.GetComponent<Button>();
             button.targetGraphic = image;
@@ -152,7 +160,7 @@ namespace BioimageVR
             CreateBreadcrumbRow();
             CreateLabel("Lade ...");
             idrClient.ListLevel(idrLevel, idrProjectId, idrDatasetId, idrOffset, IdrPageSize,
-                (items, total, error) => OnIdrListLoaded(items, total, error, append: false));
+                (items, nextOffset, hasMore, error) => OnIdrListLoaded(items, nextOffset, hasMore, error, append: false));
         }
 
         // haengt weitere eintraege HINTEN an statt die schon gezeigten wegzuwerfen -
@@ -160,7 +168,7 @@ namespace BioimageVR
         private void LoadMoreIdr()
         {
             idrClient.ListLevel(idrLevel, idrProjectId, idrDatasetId, idrOffset, IdrPageSize,
-                (items, total, error) => OnIdrListLoaded(items, total, error, append: true));
+                (items, nextOffset, hasMore, error) => OnIdrListLoaded(items, nextOffset, hasMore, error, append: true));
         }
 
         private void CreateBreadcrumbRow()
@@ -194,6 +202,7 @@ namespace BioimageVR
             backColors.normalColor = UITheme.Surface;
             backColors.highlightedColor = UITheme.SurfaceHover;
             backColors.pressedColor = UITheme.SurfacePressed;
+            backColors.selectedColor = backColors.normalColor;
             backColors.fadeDuration = 0.08f;
             backButton.colors = backColors;
         }
@@ -206,7 +215,7 @@ namespace BioimageVR
             Refresh();
         }
 
-        private void OnIdrListLoaded(List<IdrItem> items, int total, string error, bool append)
+        private void OnIdrListLoaded(List<IdrItem> items, int nextOffset, bool hasMore, string error, bool append)
         {
             if (this == null) return; // panel evtl. neu gebaut worden waehrend die anfrage lief
 
@@ -230,8 +239,10 @@ namespace BioimageVR
                 return;
             }
 
-            idrTotal = total;
-            idrOffset += items.Count;
+            // NICHT idrOffset += items.Count - level=images kommt serverseitig gefiltert
+            // zurueck (has_zarr+3d, siehe upload_server.py _scan_usable_images), der
+            // server sagt uns direkt wo die naechste anfrage weitermachen soll
+            idrOffset = nextOffset;
 
             if (!append && items.Count == 0)
             {
@@ -240,7 +251,7 @@ namespace BioimageVR
             }
 
             foreach (var item in items) CreateIdrRow(item);
-            if (idrOffset < idrTotal) CreateLoadMoreRow();
+            if (hasMore) CreateLoadMoreRow();
         }
 
         private void CreateIdrRow(IdrItem item)
@@ -255,8 +266,17 @@ namespace BioimageVR
             image.type = Image.Type.Sliced;
             image.color = Color.white;
 
+            bool hasThumbnail = item.preview_image_id > 0;
+            if (hasThumbnail)
+            {
+                RawImage thumbnail = CreateThumbnail(rowGO.transform);
+                string url = $"https://idr.openmicroscopy.org/webclient/render_thumbnail/{item.preview_image_id}/";
+                StartCoroutine(LoadThumbnailCoroutine(thumbnail, url));
+            }
+
             bool noZarr = idrLevel == "images" && !item.has_zarr;
-            var text = CreateLabel(noZarr ? baseName + "  (kein Volumen)" : baseName, rowGO.transform);
+            var text = CreateLabel(noZarr ? baseName + "  (kein Volumen)" : baseName, rowGO.transform,
+                hasThumbnail ? ThumbnailLabelOffset : DefaultLabelOffset);
             if (noZarr) text.color = UITheme.TextSecondary;
 
             var button = rowGO.GetComponent<Button>();
@@ -267,6 +287,7 @@ namespace BioimageVR
             colors.normalColor = UITheme.Surface;
             colors.highlightedColor = UITheme.SurfaceHover;
             colors.pressedColor = UITheme.SurfacePressed;
+            colors.selectedColor = colors.normalColor;
             colors.fadeDuration = 0.08f;
             button.colors = colors;
         }
@@ -341,8 +362,49 @@ namespace BioimageVR
             colors.normalColor = UITheme.AccentSoft;
             colors.highlightedColor = UITheme.SurfaceHover;
             colors.pressedColor = UITheme.SurfacePressed;
+            colors.selectedColor = colors.normalColor;
             colors.fadeDuration = 0.08f;
             button.colors = colors;
+        }
+
+        // vorschau-quadrat links in der zeile (siehe CreateLocalRow/CreateIdrRow) - lokal
+        // aus VolumeLibrary.Entry.ThumbnailPath (fetch_from_idr._save_thumbnail, mittlerer
+        // z-schnitt, zeigt die tatsaechlich schon verarbeiteten daten), beim IDR-durchklicken
+        // direkt idrs eigenes oeffentliches thumbnail (noch nicht heruntergeladen)
+        private const float ThumbnailSize = 48f;
+        private const float ThumbnailMargin = 8f;
+        private const float DefaultLabelOffset = 16f;
+        private const float ThumbnailLabelOffset = ThumbnailMargin * 2f + ThumbnailSize;
+
+        private RawImage CreateThumbnail(Transform parent)
+        {
+            var go = new GameObject("Thumbnail", typeof(RawImage));
+            go.transform.SetParent(parent, false);
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0f, 0.5f);
+            rect.anchorMax = new Vector2(0f, 0.5f);
+            rect.pivot = new Vector2(0f, 0.5f);
+            rect.anchoredPosition = new Vector2(ThumbnailMargin, 0f);
+            rect.sizeDelta = new Vector2(ThumbnailSize, ThumbnailSize);
+
+            var rawImage = go.GetComponent<RawImage>();
+            rawImage.color = UITheme.Surface; // platzhalter bis das echte bild geladen ist
+            rawImage.raycastTarget = false;
+            return rawImage;
+        }
+
+        // laedt asynchron, schlaegt einfach lautlos fehl (platzhalter bleibt stehen) -
+        // eine kaputte vorschau darf das laden des eigentlichen volumens nicht verhindern
+        private IEnumerator LoadThumbnailCoroutine(RawImage target, string url)
+        {
+            using var request = UnityWebRequestTexture.GetTexture(url);
+            yield return request.SendWebRequest();
+
+            if (target == null) yield break; // zeile evtl. inzwischen neu gebaut worden
+            if (request.result != UnityWebRequest.Result.Success) yield break;
+
+            target.texture = DownloadHandlerTexture.GetContent(request);
+            target.color = Color.white;
         }
 
         private void CreateLabel(string message)
@@ -350,14 +412,16 @@ namespace BioimageVR
             CreateLabel(message, listContainer);
         }
 
-        private Text CreateLabel(string message, Transform parent)
+        private Text CreateLabel(string message, Transform parent) => CreateLabel(message, parent, DefaultLabelOffset);
+
+        private Text CreateLabel(string message, Transform parent, float leftOffset)
         {
             var go = new GameObject("Text", typeof(Text));
             go.transform.SetParent(parent, false);
             var rect = go.GetComponent<RectTransform>();
             rect.anchorMin = Vector2.zero;
             rect.anchorMax = Vector2.one;
-            rect.offsetMin = new Vector2(16f, 0f);
+            rect.offsetMin = new Vector2(leftOffset, 0f);
             rect.offsetMax = new Vector2(-16f, 0f);
 
             var text = go.GetComponent<Text>();

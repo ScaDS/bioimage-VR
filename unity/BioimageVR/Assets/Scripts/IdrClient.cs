@@ -15,6 +15,11 @@ namespace BioimageVR
         public int id;
         public string name;
         public bool has_zarr;
+
+        // welches bild als thumbnail-stellvertreter dient (bei studien/datasets ein
+        // anderes bild als die id selbst, bei einzelbildern == id), siehe
+        // upload_server.py _attach_previews. 0 wenn keins gefunden wurde
+        public int preview_image_id;
     }
 
     // spricht mit dem lokalen preprocessing/upload_server.py im gleichen wlan - browsen
@@ -25,16 +30,27 @@ namespace BioimageVR
         [Tooltip("wlan adresse von preprocessing/upload_server.py, siehe dessen konsolenausgabe beim start")]
         [SerializeField] private string serverBaseUrl = "http://192.168.1.23:8000";
 
-        [Serializable] private class ListResponse { public IdrItem[] items; public int total; public string error; }
+        [Serializable] private class ListResponse
+        {
+            public IdrItem[] items;
+            public int total;
+            // naechster offset fuers "Mehr laden" - NICHT einfach offset+items.Length,
+            // weil level=images serverseitig auf has_zarr+3d gefiltert zurueckkommt
+            // (siehe upload_server.py _scan_usable_images), items.Length und die
+            // tatsaechlich gescannte rohe menge laufen da auseinander
+            public int next_offset;
+            public bool has_more;
+            public string error;
+        }
 
         public void ListLevel(string level, int? projectId, int? datasetId, int offset, int limit,
-            Action<List<IdrItem>, int, string> callback)
+            Action<List<IdrItem>, int, bool, string> callback)
         {
             StartCoroutine(ListLevelCoroutine(level, projectId, datasetId, offset, limit, callback));
         }
 
         private IEnumerator ListLevelCoroutine(string level, int? projectId, int? datasetId, int offset, int limit,
-            Action<List<IdrItem>, int, string> callback)
+            Action<List<IdrItem>, int, bool, string> callback)
         {
             string url = $"{serverBaseUrl}/idr_list?level={level}&offset={offset}&limit={limit}";
             if (projectId.HasValue) url += $"&project_id={projectId.Value}";
@@ -45,7 +61,7 @@ namespace BioimageVR
 
             if (request.result != UnityWebRequest.Result.Success)
             {
-                callback?.Invoke(new List<IdrItem>(), 0, $"{request.error}: {request.downloadHandler?.text}");
+                callback?.Invoke(new List<IdrItem>(), offset, false, $"{request.error}: {request.downloadHandler?.text}");
                 yield break;
             }
 
@@ -56,18 +72,18 @@ namespace BioimageVR
             }
             catch (Exception e)
             {
-                callback?.Invoke(new List<IdrItem>(), 0, $"Antwort konnte nicht verarbeitet werden: {e.Message}");
+                callback?.Invoke(new List<IdrItem>(), offset, false, $"Antwort konnte nicht verarbeitet werden: {e.Message}");
                 yield break;
             }
 
             if (!string.IsNullOrEmpty(parsed?.error))
             {
-                callback?.Invoke(new List<IdrItem>(), 0, parsed.error);
+                callback?.Invoke(new List<IdrItem>(), offset, false, parsed.error);
                 yield break;
             }
 
             var items = parsed?.items != null ? new List<IdrItem>(parsed.items) : new List<IdrItem>();
-            callback?.Invoke(items, parsed?.total ?? 0, null);
+            callback?.Invoke(items, parsed?.next_offset ?? offset, parsed?.has_more ?? false, null);
         }
 
         public void FetchVolume(int imageId, Action<string, string> callback)

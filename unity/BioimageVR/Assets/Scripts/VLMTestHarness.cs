@@ -6,9 +6,6 @@ namespace BioimageVR
 {
     // manueller test fuer vlmclient, nur tastatur - A-Taste ist jetzt der panel klick
     // macht screenshot, feste frage, antwort in text
-    //
-    // screenshot faengt spectator fenster ein, nicht das echte augenbild
-    // bei falscher antwort auf dem geraet stattdessen rendertexture nutzen
     [RequireComponent(typeof(VLMClient))]
     public class VLMTestHarness : MonoBehaviour
     {
@@ -42,7 +39,7 @@ namespace BioimageVR
 
             yield return null;
             yield return new WaitForEndOfFrame();
-            Texture2D screenshot = ScreenCapture.CaptureScreenshotAsTexture();
+            Texture2D screenshot = SceneScreenshot.Capture(Camera.main);
 
             SetStatus("Frage das VLM ...");
             client.AskAboutImage(screenshot, question,

@@ -67,3 +67,16 @@ crashlytics-build.properties
 
 # offiziell importiertes unity sample, bei bedarf ueber den package manager neu holen
 /unity/BioimageVR/Assets/Samples/
+
+# eigene notizen, nicht fuer das repo
+/NAECHSTE_TODOS.md
+/VOLUME_RENDERING_RESEARCH.md
+/WUNSCHLISTE_STATUS.md
+
+# lokale daten und experimente, zu gross fuers repo
+/data/
+/experiments/
+
+# vom meta xr paket lokal erzeugt
+/unity/BioimageVR/Assets/XR/APILayers~/
+unity/BioimageVR/*.log

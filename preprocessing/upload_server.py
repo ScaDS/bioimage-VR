@@ -26,6 +26,7 @@ oeffentliche internet.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import socket
 import subprocess
@@ -53,6 +54,7 @@ from fetch_from_idr import (
     first_dataset_image_id,
     first_project_preview_image_id,
     has_zarr,
+    is_3d,
     list_dataset_images_page,
     list_project_datasets_page,
     list_projects_page,
@@ -246,7 +248,7 @@ let idrLoadedOnce = false;
 let idrLevel = 'projects';
 let idrProjectId = null, idrProjectName = '';
 let idrDatasetId = null, idrDatasetName = '';
-let idrOffset = 0, idrTotal = 0;
+let idrOffset = 0;
 const IDR_PAGE = 40;
 
 function escapeHtml(s) {
@@ -337,9 +339,8 @@ async function loadIdrLevel(reset) {
       idrLoadMoreBtn.style.display = 'none';
     } else {
       addIdrItems(data.items);
-      idrTotal = data.total;
-      idrOffset += data.items.length;
-      idrLoadMoreBtn.style.display = idrOffset < idrTotal ? 'block' : 'none';
+      idrOffset = data.next_offset;
+      idrLoadMoreBtn.style.display = data.has_more ? 'block' : 'none';
     }
   } catch (err) {
     idrBrowseGrid.innerHTML = '<div class="idr-empty">Fehler: ' + String(err) + '</div>';
@@ -492,10 +493,26 @@ def push_or_open(output_path: Path) -> dict:
     return result
 
 
+def _safe_stem(raw: str) -> str:
+    """dateiname-baustein von einem client saeubern, bevor er in einen serverseitigen
+    pfad einfliesst - wichtig sobald die studie laeuft und beliebige teilnehmergeraete
+    das formular ausfuellen (Punkt 15 der wunschliste, STATUS.md 25.08.). Path(...).name
+    verwirft jedes verzeichnis-praefix (auch ../../), der rest wird auf harmlose
+    zeichen eingedampft - sonst koennte ein praeparierter dateiname/name-feld ausserhalb
+    von SAMPLE_DIR schreiben oder bestehende dateien ueberschreiben"""
+    name_only = Path(raw).name
+    cleaned = re.sub(r"[^\w.-]", "_", name_only).strip("._")
+    return cleaned[:80] or "upload"
+
+
 @app.post("/upload")
 def upload(file: UploadFile = File(...), name: str = Form(None)) -> JSONResponse:
-    stem = name or Path(file.filename).stem or "upload"
+    stem = _safe_stem(name or Path(file.filename).stem or "upload")
     output_path = SAMPLE_DIR / f"{stem}.nii.gz"
+    if output_path.exists():
+        # zwei teilnehmer mit gleich benanntem file (z.b. beide "image.tif" vom handy)
+        # sollen sich nicht gegenseitig ueberschreiben
+        output_path = SAMPLE_DIR / f"{stem}_{uuid.uuid4().hex[:6]}.nii.gz"
 
     # original-endung behalten, bioio erkennt das format meist daran
     suffix = Path(file.filename).suffix
@@ -574,6 +591,47 @@ def _attach_previews(items: list[dict], resolve) -> None:
         item["has_zarr"] = zarr_ok
 
 
+def _scan_usable_images(dataset_id: int, start_offset: int, limit: int) -> tuple[list[dict], int, int, bool]:
+    """wie list_dataset_images_page, aber ueberspringt bilder ohne zarr-volumen UND ohne
+    echten 3d-stack (SizeZ<=1) - die grosse mehrheit der 2d-objekttraeger-scans soll erst
+    gar nicht mehr in der galerie auftauchen (vorher nur abgedunkelt mit badge). scannt
+    dafuer notfalls mehrere rohe seiten hintereinander bis 'limit' brauchbare bilder
+    zusammen sind oder das dataset zuende ist. offset/total bleiben in der ROHEN
+    (ungefilterten) indexzaehlung, next_offset sagt dem client wo die naechste 'Mehr
+    laden'-anfrage weitermachen soll - kann nicht einfach offset+len(items) sein, weil
+    gefilterte items die zaehlung sonst durcheinanderbringen wuerden (client wuerde
+    sonst dieselben rohen bilder mehrfach anfragen bzw. welche ueberspringen)"""
+    usable: list[dict] = []
+    offset = start_offset
+    raw_total = 0
+
+    while len(usable) < limit:
+        page_items, raw_total = list_dataset_images_page(dataset_id, offset=offset, limit=40)
+        if not page_items:
+            break
+        offset += len(page_items)
+
+        def check(item: dict) -> tuple[dict, bool]:
+            image_id = item["id"]
+            return item, has_zarr(image_id) and is_3d(image_id)
+
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            checked = list(pool.map(check, page_items))
+
+        for item, ok in checked:
+            if not ok:
+                continue
+            item["has_zarr"] = True
+            usable.append(item)
+            if len(usable) >= limit:
+                break
+
+        if offset >= raw_total:
+            break
+
+    return usable[:limit], offset, raw_total, offset < raw_total
+
+
 @app.get("/idr_list")
 def idr_list(
     level: str,
@@ -587,26 +645,34 @@ def idr_list(
     von den obersten idr-studien bis zum einzelnen bild durchklicken kann, ohne vorher
     irgendeine id kennen zu muessen. jedes item bekommt ein preview_image_id (siehe
     _attach_previews) - der browser laedt das thumbnail dann direkt von idr selbst
-    (siehe PAGE, <img src> ist nicht von cors betroffen, kein bild-proxy noetig)"""
+    (siehe PAGE, <img src> ist nicht von cors betroffen, kein bild-proxy noetig).
+
+    'next_offset'/'has_more' statt nur 'total' im ergebnis, weil level=images gefiltert
+    zurueckkommt (siehe _scan_usable_images) - offset und anzahl zurueckgegebener items
+    laufen dort auseinander. bei projects/datasets (ungefiltert) ist next_offset einfach
+    offset+len(items), identisch zum alten client-seitigen offset += items.Count"""
     try:
         if level == "projects":
             items, total = list_projects_page(offset=offset, limit=limit)
             _attach_previews(items, first_project_preview_image_id)
+            next_offset = offset + len(items)
+            has_more = next_offset < total
         elif level == "datasets":
             if project_id is None:
                 return JSONResponse({"items": [], "total": 0, "error": "project_id fehlt."}, status_code=400)
             items, total = list_project_datasets_page(project_id, offset=offset, limit=limit)
             _attach_previews(items, first_dataset_image_id)
+            next_offset = offset + len(items)
+            has_more = next_offset < total
         elif level == "images":
             if dataset_id is None:
                 return JSONResponse({"items": [], "total": 0, "error": "dataset_id fehlt."}, status_code=400)
-            items, total = list_dataset_images_page(dataset_id, offset=offset, limit=limit)
-            _attach_previews(items, lambda image_id: image_id)
+            items, total, next_offset, has_more = _scan_usable_images(dataset_id, offset, limit)
         else:
             return JSONResponse({"items": [], "total": 0, "error": f"unbekannte ebene: {level}"}, status_code=400)
     except Exception as error:
         return JSONResponse({"items": [], "total": 0, "error": str(error)}, status_code=502)
-    return JSONResponse({"items": items, "total": total})
+    return JSONResponse({"items": items, "total": total, "next_offset": next_offset, "has_more": has_more})
 
 
 @app.post("/idr_fetch")

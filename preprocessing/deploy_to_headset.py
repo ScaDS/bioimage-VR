@@ -67,9 +67,9 @@ def check_single_device(adb: str) -> None:
         )
 
 
-def push_to_device(adb: str, local_path: Path, package: str) -> None:
+def push_to_device(adb: str, local_path: Path, package: str, remote_name: str | None = None) -> None:
     remote_dir = f"/sdcard/Android/data/{package}/files"
-    remote_path = f"{remote_dir}/{local_path.name}"
+    remote_path = f"{remote_dir}/{remote_name or local_path.name}"
 
     subprocess.run([adb, "shell", "mkdir", "-p", remote_dir], check=True)
     subprocess.run([adb, "push", str(local_path), remote_path], check=True)
@@ -122,6 +122,16 @@ def main() -> None:
     adb = args.adb or find_adb()
     check_single_device(adb)
     push_to_device(adb, output_path, args.package)
+
+    thumbnail_path = output_path.with_name(f"{output_path.stem.removesuffix('.nii')}_thumbnail.jpg")
+    if thumbnail_path.is_file():
+        push_to_device(adb, thumbnail_path, args.package)
+
+    metadata_path = output_path.with_name("metadata.json")
+    if metadata_path.is_file():
+        remote_name = f"{output_path.stem.removesuffix('.nii')}_metadata.json"
+        push_to_device(adb, metadata_path, args.package, remote_name=remote_name)
+
     ensure_api_key_pushed(adb, args.package)
     print(
         "Done. On the headset: Volume File Path only needs to match the filename "

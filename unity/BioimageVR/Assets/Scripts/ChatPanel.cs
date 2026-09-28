@@ -10,6 +10,13 @@ namespace BioimageVR
     {
         [SerializeField] private Text contentText;
         [SerializeField] private ScrollRect scrollRect;
+        // zweite, unabhaengige anzeige desselben verlaufs (siehe SetupSidePanel.
+        // CreateHudTextPanel) - der kamera-fixierte chat-kurzzugriff unten rechts zeigt
+        // denselben inhalt wie die chat-seite im seitenpanel, beide bleiben synchron,
+        // ohne dass man dafuer zwischen zwei ChatPanel-instanzen hin und her muesste.
+        // optional, darf leer bleiben (aeltere szenen ohne hud-chat-panel)
+        [SerializeField] private Text secondaryContentText;
+        [SerializeField] private ScrollRect secondaryScrollRect;
         [SerializeField] private int maxMessages = 40;
 
         private readonly List<string> messages = new List<string>();
@@ -23,8 +30,10 @@ namespace BioimageVR
             messages.Add(line);
             while (messages.Count > maxMessages) messages.RemoveAt(0);
 
-            if (contentText != null) contentText.text = string.Join("\n\n", messages);
-            if (scrollRect != null) StartCoroutine(ScrollToBottomNextFrame());
+            string joined = string.Join("\n\n", messages);
+            if (contentText != null) contentText.text = joined;
+            if (secondaryContentText != null) secondaryContentText.text = joined;
+            if (scrollRect != null || secondaryScrollRect != null) StartCoroutine(ScrollToBottomNextFrame());
         }
 
         // layout braucht einen frame, sonst scrollt er zur alten hoehe
@@ -32,6 +41,7 @@ namespace BioimageVR
         {
             yield return null;
             if (scrollRect != null) scrollRect.verticalNormalizedPosition = 0f;
+            if (secondaryScrollRect != null) secondaryScrollRect.verticalNormalizedPosition = 0f;
         }
     }
 }
