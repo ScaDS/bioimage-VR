@@ -80,3 +80,12 @@ crashlytics-build.properties
 # vom meta xr paket lokal erzeugt
 /unity/BioimageVR/Assets/XR/APILayers~/
 unity/BioimageVR/*.log
+
+# hilfs und testskripte, bleiben lokal
+/preprocessing/rag_walkthrough.ipynb
+/preprocessing/vlm_playground.py
+/preprocessing/record_headset.py
+
+# leere unity standardszene, echte szene ist Assets/Scenes/Phase1.unity
+/unity/BioimageVR/Assets/bioimagevr.unity
+/unity/BioimageVR/Assets/bioimagevr.unity.meta
