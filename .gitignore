@@ -1,6 +1,7 @@
 # python
 __pycache__/
 *.pyc
+*.egg-info/
 
 # lokale setup logs
 unity/*.log

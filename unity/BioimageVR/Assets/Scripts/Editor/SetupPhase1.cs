@@ -228,6 +228,8 @@ namespace BioimageVR.EditorSetup
 
             GameObject volumeGO = GameObject.CreatePrimitive(PrimitiveType.Cube);
             volumeGO.name = "Volume";
+            // collider vom primitiv braucht nichts, der controller strahl bleibt sonst dran haengen
+            Object.DestroyImmediate(volumeGO.GetComponent<Collider>());
             volumeGO.transform.position = new Vector3(0f, 1.5f, 2f);
 
             var renderer = volumeGO.GetComponent<MeshRenderer>();

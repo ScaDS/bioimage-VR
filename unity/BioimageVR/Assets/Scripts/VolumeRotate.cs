@@ -7,6 +7,7 @@ namespace BioimageVR
     // volumen frei drehen, linker thumbstick, sonst tut der gerade nichts
     // x achse gibt yaw, y achse gibt pitch, beides weltraum um den eigenen mittelpunkt
     // pausiert wenn der linke strahl gerade aufs panel zeigt, gleiches muster wie VolumeZoom
+    // im fly modus ebenfalls, dann gehoert der stick VolumeFly
     [RequireComponent(typeof(VolumeView))]
     public class VolumeRotate : MonoBehaviour
     {
@@ -16,9 +17,13 @@ namespace BioimageVR
         [SerializeField] private XRRayInteractor leftHandRay;
 
         private InputAction controllerRotateAction;
+        private VolumeFly fly;
+        private Quaternion initialRotation;
 
         private void Awake()
         {
+            initialRotation = transform.rotation;
+            fly = GetComponent<VolumeFly>();
             controllerRotateAction = new InputAction(
                 type: InputActionType.Value,
                 binding: "<XRController>{LeftHand}/primary2DAxis",
@@ -35,6 +40,11 @@ namespace BioimageVR
             controllerRotateAction.Disable();
         }
 
+        // drehung zurueck wie beim start, View werkzeug
+        public void ResetView() => transform.rotation = initialRotation;
+
+        public XRRayInteractor LeftHandRay => leftHandRay;
+
         private void OnDestroy()
         {
             controllerRotateAction?.Dispose();
@@ -42,6 +52,8 @@ namespace BioimageVR
 
         private void Update()
         {
+            if (fly == null) fly = GetComponent<VolumeFly>();
+            if (fly != null && fly.Active) return;
             bool pointingAtPanel = leftHandRay != null && leftHandRay.TryGetCurrentUIRaycastResult(out _);
             if (pointingAtPanel) return;
 

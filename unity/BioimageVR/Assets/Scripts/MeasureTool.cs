@@ -24,7 +24,6 @@ namespace BioimageVR
         [SerializeField] private XRRayInteractor rightHandRay;
         [SerializeField] private Material lineMaterial;
         [SerializeField] private Color accentColor = new Color(0.30f, 0.80f, 0.74f);
-        [SerializeField] private float labelWorldScale = 0.012f;
         [SerializeField] private float markerWorldSize = 0.012f;
         [SerializeField] private int maxBlobVoxels = 4_000_000;
 
@@ -49,7 +48,7 @@ namespace BioimageVR
         // modus oder lineal schritt geaendert, fuer toolbar und hinweis text
         public event System.Action StateChanged;
         public BlobResult? LastBlob { get; private set; }
-        // letzte fertige lineal distanz in µm bzw px
+        // letzte fertige lineal distanz in der einheit des bilds, siehe VolumeView.Unit
         public float? LastDistance { get; private set; }
 
         private VolumeView volumeView;
@@ -70,12 +69,12 @@ namespace BioimageVR
         private LineRenderer rulerLine;
         private Transform startMarker;
         private Transform endMarker;
-        private TextMesh label;
+        private WorldTooltip label;
+        private string labelText = "";
         private Vector3 labelAnchorLocal;
         private int measureToken;
-        // statistik pro label, einmal pro volumen beim ersten klick berechnet
-        private BlobResult[] labelStats;
-        private NiftiVolumeLoader.Volume labelStatsVolume;
+        // true wenn die aktuelle auswahl vom mess tool kommt, nur dann beim loeschen zuruecksetzen
+        private bool selectionFromMeasure;
 
         private void Awake()
         {
@@ -131,19 +130,19 @@ namespace BioimageVR
                 switch (CurrentMode)
                 {
                     case Mode.Ruler when !rulerStart.HasValue:
-                        return "Auf die Zelle zeigen, X oder A setzt den Startpunkt";
+                        return "Point at the cell · A sets the start point";
                     case Mode.Ruler when !rulerEnd.HasValue:
-                        return "X oder A setzt den Endpunkt";
+                        return "A sets the end point";
                     case Mode.Ruler:
-                        return "X oder A startet eine neue Messung, ins Leere klicken loescht";
+                        return "A starts a new measurement · click into empty space to clear";
                     case Mode.Blob when UseLabels && !LastBlob.HasValue:
-                        return "Auf eine farbige Zelle zeigen, X oder A misst sie";
+                        return "Point at a coloured cell · A measures it";
                     case Mode.Blob when UseLabels:
-                        return "X oder A misst die naechste Zelle, ins Leere klicken loescht";
+                        return "A measures the next cell · click into empty space to clear";
                     case Mode.Blob when !LastBlob.HasValue:
-                        return "Auf einen Blob zeigen, X oder A misst ihn";
+                        return "Point at a blob · A measures it";
                     case Mode.Blob:
-                        return "Blobs kleben zusammen? Threshold hoeher stellen";
+                        return "Blobs stick together? Raise the threshold in Display";
                     default:
                         return "";
                 }
@@ -198,9 +197,8 @@ namespace BioimageVR
             UpdateRulerVisuals();
 
             if (label == null || !label.gameObject.activeSelf) return;
+            label.Show(labelText, transform.TransformPoint(labelAnchorLocal) + Vector3.up * 0.03f);
             // konstante weltgroesse egal wie gezoomt
-            label.transform.position = transform.TransformPoint(labelAnchorLocal) + Vector3.up * 0.03f;
-            label.transform.localScale = Vector3.one * labelWorldScale;
         }
 
         private bool TryGetPointerRay(out Ray ray)
@@ -261,7 +259,7 @@ namespace BioimageVR
             if (!hasLine)
             {
                 if (rulerLine != null) rulerLine.gameObject.SetActive(false);
-                if (CurrentMode == Mode.Ruler && label != null) label.gameObject.SetActive(false);
+                if (CurrentMode == Mode.Ruler && label != null) label.Hide();
                 return;
             }
 
@@ -283,7 +281,7 @@ namespace BioimageVR
             rulerLine.endColor = c;
 
             labelAnchorLocal = (rulerStart.Value + end.Value) * 0.5f;
-            ShowLabel(FormatDistance(PhysicalDistance(rulerStart.Value, end.Value)));
+            ShowLabel(WorldTooltip.Mono(FormatDistance(PhysicalDistance(rulerStart.Value, end.Value))));
         }
 
         private void PlaceMarker(ref Transform marker, string name, Vector3 local)
@@ -317,10 +315,7 @@ namespace BioimageVR
 
         private string FormatDistance(float d)
         {
-            if (!volumeView.HasPhysicalVoxelSize) return $"{d:0.#} px";
-            if (d >= 1000f) return $"{d / 1000f:0.##} mm";
-            if (d >= 1f) return $"{d:0.##} µm";
-            return $"{d * 1000f:0} nm";
+            return Units.Length(d, volumeView.Unit);
         }
 
         // auto blob
@@ -346,7 +341,7 @@ namespace BioimageVR
             IntensityRule rule = CurrentRule(vol);
             int myToken = ++measureToken;
             labelAnchorLocal = VoxelToLocal(vol, seed % vol.SizeX + 0.5f, seed / vol.SizeX % vol.SizeY + 1f, seed / (vol.SizeX * vol.SizeY) + 0.5f);
-            ShowLabel("misst ...");
+            ShowLabel("measuring ...");
 
             // flood fill kann bei grossen blobs dauern, nicht im main thread
             BlobResult result = await Task.Run(() => FloodFill(vol, rule, seed, maxBlobVoxels));
@@ -361,68 +356,33 @@ namespace BioimageVR
             ShowLabel(FormatBlob(vol, result));
         }
 
-        private async void MeasureLabel(Ray worldRay)
+        private void MeasureLabel(Ray worldRay)
         {
             NiftiVolumeLoader.Volume vol = volumeView.LoadedVolume;
-            if (!TryPickLabel(worldRay, out int id))
+            if (!volumeView.TryPickCell(worldRay, out int id, out _))
             {
                 Clear();
                 return;
             }
 
-            int myToken = ++measureToken;
-            if (labelStatsVolume != vol)
+            // werte kommen fertig aus dem laden, siehe CellStats
+            CellInfo cell = vol.Cells[id];
+            BlobResult result = new BlobResult
             {
-                ShowLabel("misst ...");
-                BlobResult[] stats = await Task.Run(() => ComputeLabelStats(vol));
-                if (vol != volumeView.LoadedVolume) return;
-                labelStats = stats;
-                labelStatsVolume = vol;
-                if (myToken != measureToken) return;
-            }
-
-            BlobResult result = labelStats[id];
+                VoxelCount = cell.VoxelCount,
+                Min = cell.Min,
+                Max = cell.Max,
+                MeanIntensity = cell.MeanIntensity,
+                Label = id,
+            };
+            measureToken++;
             LastBlob = result;
-            volumeView.SetSelectedLabel(id);
+            volumeView.SelectedLabel = id;
+            selectionFromMeasure = true;
             StateChanged?.Invoke();
             labelAnchorLocal = VoxelToLocal(vol, (result.Min.x + result.Max.x + 1) * 0.5f, result.Max.y + 1f, (result.Min.z + result.Max.z + 1) * 0.5f);
             DrawBox(vol, result);
             ShowLabel(FormatBlob(vol, result));
-        }
-
-        // ein durchlauf ueber alle voxel, anzahl box und mittlere intensitaet pro id
-        private static BlobResult[] ComputeLabelStats(NiftiVolumeLoader.Volume vol)
-        {
-            int sx = vol.SizeX, sy = vol.SizeY;
-            var stats = new BlobResult[vol.MaxLabel + 1];
-            var sums = new double[vol.MaxLabel + 1];
-            for (int id = 0; id < stats.Length; id++)
-            {
-                stats[id].Label = id;
-                stats[id].Min = new Vector3Int(int.MaxValue, int.MaxValue, int.MaxValue);
-                stats[id].Max = new Vector3Int(-1, -1, -1);
-            }
-
-            ushort[] labels = vol.Labels;
-            int i = 0;
-            for (int z = 0; z < vol.SizeZ; z++)
-            for (int y = 0; y < sy; y++)
-            for (int x = 0; x < sx; x++, i++)
-            {
-                int id = labels[i];
-                if (id == 0) continue;
-                ref BlobResult r = ref stats[id];
-                r.VoxelCount++;
-                r.Min = Vector3Int.Min(r.Min, new Vector3Int(x, y, z));
-                r.Max = Vector3Int.Max(r.Max, new Vector3Int(x, y, z));
-                sums[id] += vol.IsColor
-                    ? Mathf.Max(vol.Voxels[i * 3], Mathf.Max(vol.Voxels[i * 3 + 1], vol.Voxels[i * 3 + 2])) / 255f
-                    : vol.Voxels[i] / 255f;
-            }
-
-            for (int id = 1; id < stats.Length; id++)
-                if (stats[id].VoxelCount > 0) stats[id].MeanIntensity = (float)(sums[id] / stats[id].VoxelCount);
-            return stats;
         }
 
         private static BlobResult FloodFill(NiftiVolumeLoader.Volume vol, IntensityRule rule, int seed, int maxVoxels)
@@ -493,7 +453,7 @@ namespace BioimageVR
         private string FormatBlob(NiftiVolumeLoader.Volume vol, BlobResult r)
         {
             Vector3 vs = vol.VoxelSize;
-            string unit = volumeView.HasPhysicalVoxelSize ? "µm" : "px";
+            string unit = volumeView.Unit;
 
             float volume = r.VoxelCount * vs.x * vs.y * vs.z;
             // durchmesser einer kugel mit gleichem volumen
@@ -503,12 +463,11 @@ namespace BioimageVR
             float ez = (r.Max.z - r.Min.z + 1) * vs.z;
 
             string text =
-                (r.Label > 0 ? $"Zelle {r.Label}\n" : "") +
-                $"V {volume:0.##} {unit}³\n" +
-                $"Ø {eqDiameter:0.##} {unit} (kugel aequiv.)\n" +
-                $"X {ex:0.#}  Y {ey:0.#}  Z {ez:0.#} {unit}\n" +
-                $"{r.VoxelCount} voxel, I {r.MeanIntensity:0.00}";
-            if (r.Truncated) text += "\nabgebrochen, threshold hoeher";
+                WorldTooltip.Title(r.Label > 0 ? volumeView.LabelName(r.Label) : "Blob") + "\n" +
+                "Volume  " + WorldTooltip.Mono(Units.Volume(volume, unit)) + "\n" +
+                "Eq. diameter  " + WorldTooltip.Mono(Units.Length(eqDiameter, unit, "0.0")) + "\n" +
+                "Extent  " + WorldTooltip.Mono($"{Units.Plain(ex, unit)} · {Units.Plain(ey, unit)} · {Units.Plain(ez, unit)} {unit}");
+            if (r.Truncated) text += "\n" + WorldTooltip.Warn("Stopped early · raise the threshold");
             return text;
         }
 
@@ -567,7 +526,7 @@ namespace BioimageVR
             IntensityRule rule = CurrentRule(vol);
             Vector3 o = transform.InverseTransformPoint(worldRay.origin);
             Vector3 d = transform.InverseTransformDirection(worldRay.direction).normalized;
-            if (!IntersectUnitBox(o, d, out float tNear, out float tFar)) return false;
+            if (!VolumeView.IntersectUnitBox(o, d, out float tNear, out float tFar)) return false;
             tNear = Mathf.Max(tNear, 0f);
 
             // halber voxel schritt, reicht um keinen voxel zu ueberspringen
@@ -588,55 +547,6 @@ namespace BioimageVR
                 }
             }
             return false;
-        }
-
-        // erster voxel mit label ungleich 0 entlang des strahls, unabhaengig vom threshold
-        private bool TryPickLabel(Ray worldRay, out int id)
-        {
-            id = 0;
-            NiftiVolumeLoader.Volume vol = volumeView.LoadedVolume;
-            if (vol?.Labels == null) return false;
-
-            Vector3 o = transform.InverseTransformPoint(worldRay.origin);
-            Vector3 d = transform.InverseTransformDirection(worldRay.direction).normalized;
-            if (!IntersectUnitBox(o, d, out float tNear, out float tFar)) return false;
-            tNear = Mathf.Max(tNear, 0f);
-
-            float step = 0.5f / Mathf.Max(vol.SizeX, Mathf.Max(vol.SizeY, vol.SizeZ));
-            for (float t = tNear; t <= tFar; t += step)
-            {
-                Vector3 uvw = o + d * t + Vector3.one * 0.5f;
-                int x = Mathf.Clamp((int)(uvw.x * vol.SizeX), 0, vol.SizeX - 1);
-                int y = Mathf.Clamp((int)(uvw.y * vol.SizeY), 0, vol.SizeY - 1);
-                int z = Mathf.Clamp((int)(uvw.z * vol.SizeZ), 0, vol.SizeZ - 1);
-                int label = vol.Labels[x + vol.SizeX * (y + vol.SizeY * z)];
-                if (label > 0)
-                {
-                    id = label;
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        // gleiche box wie IntersectBox im shader
-        private static bool IntersectUnitBox(Vector3 o, Vector3 d, out float tNear, out float tFar)
-        {
-            tNear = float.NegativeInfinity;
-            tFar = float.PositiveInfinity;
-            for (int axis = 0; axis < 3; axis++)
-            {
-                if (Mathf.Abs(d[axis]) < 1e-8f)
-                {
-                    if (o[axis] < -0.5f || o[axis] > 0.5f) return false;
-                    continue;
-                }
-                float t0 = (-0.5f - o[axis]) / d[axis];
-                float t1 = (0.5f - o[axis]) / d[axis];
-                tNear = Mathf.Max(tNear, Mathf.Min(t0, t1));
-                tFar = Mathf.Min(tFar, Mathf.Max(t0, t1));
-            }
-            return tFar > Mathf.Max(tNear, 0f);
         }
 
         // voxel koordinate auf objekt raum, gleich wie im shader
@@ -675,21 +585,6 @@ namespace BioimageVR
 
         // anzeige
 
-        private TextMesh CreateText(string name, int fontSize, TextAnchor anchor)
-        {
-            var go = new GameObject(name, typeof(TextMesh));
-            var text = go.GetComponent<TextMesh>();
-            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            go.GetComponent<MeshRenderer>().sharedMaterial = text.font.material;
-            text.fontSize = fontSize;
-            text.characterSize = 0.1f;
-            text.anchor = anchor;
-            text.alignment = TextAlignment.Center;
-            text.color = Color.white;
-            go.AddComponent<BillboardText>();
-            return text;
-        }
-
         private LineRenderer CreateLine(string name, Transform parent, bool worldSpace)
         {
             var go = new GameObject(name, typeof(LineRenderer));
@@ -704,9 +599,9 @@ namespace BioimageVR
         private void ShowLabel(string text)
         {
             // eigenes root objekt, sonst verzerrt die volumen skalierung den text
-            if (label == null) label = CreateText("MeasureLabel", 48, TextAnchor.LowerCenter);
-            label.text = text;
-            label.gameObject.SetActive(true);
+            if (label == null) label = WorldTooltip.Create("MeasureLabel");
+            labelText = text;
+            label.Show(text, transform.TransformPoint(labelAnchorLocal) + Vector3.up * 0.03f);
         }
 
         public void Clear()
@@ -714,12 +609,13 @@ namespace BioimageVR
             measureToken++;
             LastBlob = null;
             LastDistance = null;
-            if (volumeView != null && volumeView.LoadedVolume != null) volumeView.SetSelectedLabel(0);
+            if (selectionFromMeasure && volumeView != null) volumeView.SelectedLabel = 0;
+            selectionFromMeasure = false;
             rulerStart = null;
             rulerEnd = null;
             rulerPreview = null;
             if (boxLines != null) boxLines.gameObject.SetActive(false);
-            if (label != null) label.gameObject.SetActive(false);
+            if (label != null) label.Hide();
             StateChanged?.Invoke();
         }
     }

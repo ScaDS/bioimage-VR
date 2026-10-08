@@ -41,7 +41,7 @@ namespace BioimageVR
             yield return new WaitForEndOfFrame();
             Texture2D screenshot = SceneScreenshot.Capture(Camera.main);
 
-            SetStatus("Frage das VLM ...");
+            SetStatus("Asking the assistant ...");
             client.AskAboutImage(screenshot, question,
                 onSuccess: answer =>
                 {
@@ -52,8 +52,8 @@ namespace BioimageVR
                 },
                 onError: error =>
                 {
-                    SetStatus($"Fehler: {error}");
-                    chatPanel?.AddSystemMessage($"Fehler: {error}");
+                    SetStatus($"Assistant error: {error}");
+                    chatPanel?.AddSystemMessage($"Assistant error: {error}");
                     Destroy(screenshot);
                     requestInFlight = false;
                 });

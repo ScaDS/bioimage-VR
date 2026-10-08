@@ -1,25 +1,83 @@
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 
 namespace BioimageVR
 {
     // farben und formen fuer die vr oberflaeche, ein ort fuer alle stile
     // laeuft zur laufzeit UND im editor, deshalb hier und nicht unter Editor/
+    // 30.09.: palette aus dem abgestimmten mockup, angelehnt an meta horizon os.
+    // grau fuer die oberflaeche, blau nur fuer aktionen, orange nur fuer bitte pruefen
     public static class UITheme
     {
-        public static readonly Color Background = new Color(0.07f, 0.08f, 0.10f, 0.90f);
-        public static readonly Color Surface = new Color(1f, 1f, 1f, 0.06f);
-        public static readonly Color SurfaceHover = new Color(1f, 1f, 1f, 0.14f);
-        public static readonly Color SurfacePressed = new Color(0.30f, 0.80f, 0.74f, 0.35f);
-        public static readonly Color Accent = new Color(0.30f, 0.80f, 0.74f);
-        public static readonly Color AccentSoft = new Color(0.30f, 0.80f, 0.74f, 0.18f);
-        public static readonly Color AccentSecondary = new Color(0.66f, 0.56f, 0.95f);
-        public static readonly Color Warning = new Color(0.95f, 0.55f, 0.35f);
-        public static readonly Color TextPrimary = Color.white;
-        public static readonly Color TextSecondary = new Color(1f, 1f, 1f, 0.65f);
+        private static Color Rgb(int hex, float alpha = 1f) =>
+            new Color(((hex >> 16) & 0xFF) / 255f, ((hex >> 8) & 0xFF) / 255f, (hex & 0xFF) / 255f, alpha);
+
+        // flaechen, von hinten nach vorne
+        public static readonly Color Background = Rgb(0x1D2025, 0.97f);
+        public static readonly Color Track = Rgb(0x15171B);
+        public static readonly Color Surface = Rgb(0x2B2F36);
+        public static readonly Color SurfaceHover = Rgb(0x353A42);
+        public static readonly Color SurfacePressed = Rgb(0x0866FF, 0.35f);
+        public static readonly Color SurfaceDisabled = Rgb(0x22252A);
+        public static readonly Color Tooltip = Rgb(0x14161A, 0.92f);
+        public static readonly Color Divider = new Color(1f, 1f, 1f, 0.10f);
+
+        // aktionen und status
+        public static readonly Color Accent = Rgb(0x0866FF);
+        public static readonly Color AccentHover = Rgb(0x2B7BFF);
+        public static readonly Color AccentSoft = Rgb(0x0866FF, 0.18f);
+        public static readonly Color AccentText = Rgb(0x9CC2FF);
+        public static readonly Color AccentSecondary = Rgb(0x9CC2FF);
+        public static readonly Color Warning = Rgb(0xF5A524);
+        public static readonly Color WarningSoft = Rgb(0xF5A524, 0.14f);
+        public static readonly Color Danger = Rgb(0xFF8A8A);
+        public static readonly Color Success = Rgb(0x6FE3A9);
+
+        // text
+        public static readonly Color TextPrimary = Rgb(0xF2F4F7);
+        public static readonly Color TextSecondary = Rgb(0xA9B0BB);
+        public static readonly Color TextDisabled = Rgb(0x6B7280);
+        public static readonly Color TextOnAccent = Color.white;
+
         public static readonly Color RayColor = new Color(0.92f, 0.92f, 0.95f);
 
         public static string Hex(Color c) => ColorUtility.ToHtmlStringRGB(c);
+
+        // gleiche formel wie LabelColor im VolumeRaymarch shader, damit karte, liste und volumen passen
+        public static Color LabelColor(int id)
+        {
+            float h = Mathf.Repeat(id * 0.61803398875f, 1f);
+            var rgb = new Color(
+                Mathf.Clamp01(Mathf.Abs(Mathf.Repeat(h, 1f) * 6f - 3f) - 1f),
+                Mathf.Clamp01(Mathf.Abs(Mathf.Repeat(h + 2f / 3f, 1f) * 6f - 3f) - 1f),
+                Mathf.Clamp01(Mathf.Abs(Mathf.Repeat(h + 1f / 3f, 1f) * 6f - 3f) - 1f));
+            return Color.Lerp(Color.white, rgb, 0.9f);
+        }
+
+        // schriften, als tmp font assets unter Resources/Fonts & Materials, siehe Editor/SetupFonts
+        public enum FontRole { Regular, SemiBold, Bold, Mono, MonoMedium, Icons }
+
+        private static readonly Dictionary<FontRole, TMP_FontAsset> Fonts = new Dictionary<FontRole, TMP_FontAsset>();
+
+        public static string FontAssetName(FontRole role) => role switch
+        {
+            FontRole.Regular => "Figtree-Regular SDF",
+            FontRole.SemiBold => "Figtree-SemiBold SDF",
+            FontRole.Bold => "Figtree-Bold SDF",
+            FontRole.Mono => "IBMPlexMono-Regular SDF",
+            FontRole.MonoMedium => "IBMPlexMono-Medium SDF",
+            _ => "BioimageVRIcons SDF",
+        };
+
+        // null wenn SetupFonts noch nicht lief, dann nimmt tmp seine standardschrift
+        public static TMP_FontAsset Font(FontRole role)
+        {
+            if (Fonts.TryGetValue(role, out TMP_FontAsset cached) && cached != null) return cached;
+            var asset = Resources.Load<TMP_FontAsset>("Fonts & Materials/" + FontAssetName(role));
+            Fonts[role] = asset;
+            return asset;
+        }
 
         private static readonly Dictionary<int, Sprite> RoundedSprites = new Dictionary<int, Sprite>();
 
@@ -29,10 +87,12 @@ namespace BioimageVR
             if (RoundedSprites.TryGetValue(radius, out Sprite cached) && cached != null) return cached;
 
             int size = radius * 2 + 4;
-            var texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            // mipmaps und trilinear, sonst flimmern die runden kanten auf entfernung
+            var texture = new Texture2D(size, size, TextureFormat.RGBA32, true)
             {
                 wrapMode = TextureWrapMode.Clamp,
-                filterMode = FilterMode.Bilinear
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = 4
             };
 
             var pixels = new Color32[size * size];
@@ -66,163 +126,5 @@ namespace BioimageVR
             float dist = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), new Vector2(cx, cy));
             return Mathf.Clamp01(radius - dist + 0.5f);
         }
-
-        // eigenstaendige icons statt text-glyphen ("i"/"...") fuer die ecken-buttons
-        // (siehe SetupSidePanel.CreateCornerIcon) - gleiches prinzip wie RoundedSprite
-        // (per-pixel alpha-maske, weiss+alpha, faerbung passiert ueber Image.color),
-        // nur als frei geformtes icon statt 9-slice-panel. feste 96x96 generierungs-
-        // aufloesung, das Button-Image skaliert das ueber preserveAspect passend runter
-        private const int IconTextureSize = 96;
-        private static readonly Dictionary<string, Sprite> IconSprites = new Dictionary<string, Sprite>();
-
-        // kreis-ring + punkt + balken, klassisches "info" symbol - ring unabhaengig vom
-        // (kreisrunden) button-hintergrund gezeichnet, damit das icon auch fuer sich
-        // alleine als "info" erkennbar bleibt, falls es mal woanders eingesetzt wird
-        public static Sprite InfoIconSprite()
-        {
-            if (IconSprites.TryGetValue("info", out Sprite cached) && cached != null) return cached;
-
-            const float size = IconTextureSize;
-            const float centerX = size * 0.5f;
-            const float centerY = size * 0.5f;
-            const float ringRadius = size * 0.40f;
-            const float ringThickness = size * 0.075f;
-            const float dotRadius = size * 0.075f;
-            const float dotCenterY = centerY + size * 0.19f;
-            const float barHalfWidth = size * 0.075f;
-            const float barBottom = centerY - size * 0.27f;
-            const float barTop = centerY + size * 0.04f;
-
-            var pixels = new Color32[IconTextureSize * IconTextureSize];
-            for (int y = 0; y < IconTextureSize; y++)
-            {
-                for (int x = 0; x < IconTextureSize; x++)
-                {
-                    float px = x + 0.5f;
-                    float py = y + 0.5f;
-                    float alpha = RingAlpha(px, py, centerX, centerY, ringRadius, ringThickness);
-                    alpha = Mathf.Max(alpha, CircleAlpha(px, py, centerX, dotCenterY, dotRadius));
-                    alpha = Mathf.Max(alpha, RoundedRectAlpha(
-                        px, py, centerX - barHalfWidth, barBottom, centerX + barHalfWidth, barTop, barHalfWidth));
-                    pixels[y * IconTextureSize + x] = new Color(1f, 1f, 1f, alpha);
-                }
-            }
-            return BuildIconSprite("info", pixels);
-        }
-
-        // sprechblase mit drei punkten (typing-indicator-stil), klassisches "chat" symbol -
-        // ersetzt das bisherige woertliche "..." text-glyph
-        public static Sprite ChatIconSprite()
-        {
-            if (IconSprites.TryGetValue("chat", out Sprite cached) && cached != null) return cached;
-
-            const float size = IconTextureSize;
-            const float left = size * 0.104f;
-            const float right = size * 0.896f;
-            const float bottom = size * 0.313f;
-            const float top = size * 0.833f;
-            const float bodyRadius = size * 0.156f;
-            Vector2 tailA = new Vector2(size * 0.25f, bottom);
-            Vector2 tailB = new Vector2(size * 0.135f, size * 0.135f);
-            Vector2 tailC = new Vector2(size * 0.417f, bottom);
-            float dotsY = (top + bottom) / 2f;
-            float dotSpacing = size * 0.146f;
-            float dotRadius = size * 0.052f;
-
-            var pixels = new Color32[IconTextureSize * IconTextureSize];
-            for (int y = 0; y < IconTextureSize; y++)
-            {
-                for (int x = 0; x < IconTextureSize; x++)
-                {
-                    float px = x + 0.5f;
-                    float py = y + 0.5f;
-                    float alpha = RoundedRectAlpha(px, py, left, bottom, right, top, bodyRadius);
-                    alpha = Mathf.Max(alpha, TriangleAlpha(px, py, tailA, tailB, tailC));
-
-                    // punkte aus der ausgefuellten blase ausstanzen (alpha 0) statt
-                    // draufzusetzen - wirkt wie ein "loch", guter kontrast unabhaengig
-                    // von der button-farbe dahinter, kein zweiter tint-durchlauf noetig
-                    for (int i = -1; i <= 1; i++)
-                    {
-                        float dotCenterX = size * 0.5f + i * dotSpacing;
-                        if (CircleAlpha(px, py, dotCenterX, dotsY, dotRadius) > 0.5f) alpha = 0f;
-                    }
-
-                    pixels[y * IconTextureSize + x] = new Color(1f, 1f, 1f, alpha);
-                }
-            }
-            return BuildIconSprite("chat", pixels);
-        }
-
-        private static Sprite BuildIconSprite(string key, Color32[] pixels)
-        {
-            var texture = new Texture2D(IconTextureSize, IconTextureSize, TextureFormat.RGBA32, false)
-            {
-                wrapMode = TextureWrapMode.Clamp,
-                filterMode = FilterMode.Bilinear
-            };
-            texture.SetPixels32(pixels);
-            texture.Apply();
-
-            var sprite = Sprite.Create(
-                texture, new Rect(0, 0, IconTextureSize, IconTextureSize), new Vector2(0.5f, 0.5f), 100f);
-            sprite.name = $"Icon_{key}";
-
-            IconSprites[key] = sprite;
-            return sprite;
-        }
-
-        private static float CircleAlpha(float px, float py, float cx, float cy, float radius)
-        {
-            float dist = Vector2.Distance(new Vector2(px, py), new Vector2(cx, cy));
-            return Mathf.Clamp01(radius - dist + 0.5f);
-        }
-
-        // ring = grosse kreisflaeche minus kleinere kreisflaeche, beide ueber CircleAlpha
-        // (gleiche antialiasing-logik), statt eines eigenen sdf-pfads fuer ringe
-        private static float RingAlpha(float px, float py, float cx, float cy, float radius, float thickness)
-        {
-            float outer = CircleAlpha(px, py, cx, cy, radius);
-            float inner = CircleAlpha(px, py, cx, cy, radius - thickness);
-            return Mathf.Clamp01(outer - inner);
-        }
-
-        // wie CornerAlpha, aber fuer ein eigenstaendiges icon statt ein 9-slice-panel -
-        // rundet alle vier ecken UND antialiast die geraden kanten (bei RoundedSprite
-        // unnoetig, da die kanten durch den 9-slice-stretch sowieso ausserhalb des
-        // sichtbaren texturbereichs liegen; hier ist die ganze textur das icon selbst)
-        private static float RoundedRectAlpha(float px, float py, float x0, float y0, float x1, float y1, float radius)
-        {
-            bool left = px < x0 + radius;
-            bool right = px > x1 - radius;
-            bool bottom = py < y0 + radius;
-            bool top = py > y1 - radius;
-            if (!(left || right) || !(top || bottom))
-            {
-                float edgeDist = Mathf.Min(Mathf.Min(px - x0, x1 - px), Mathf.Min(py - y0, y1 - py));
-                return Mathf.Clamp01(edgeDist + 0.5f);
-            }
-
-            float cx = left ? x0 + radius : x1 - radius;
-            float cy = bottom ? y0 + radius : y1 - radius;
-            float dist = Vector2.Distance(new Vector2(px, py), new Vector2(cx, cy));
-            return Mathf.Clamp01(radius - dist + 0.5f);
-        }
-
-        // standard "gleiche seite aller drei kanten" punkt-in-dreieck test, harte kante
-        // (kein extra antialiasing) - bei 96px generierungsgroesse und bilinearer
-        // texturfilterung durch UI-Skalierung ausreichend glatt
-        private static float TriangleAlpha(float px, float py, Vector2 a, Vector2 b, Vector2 c)
-        {
-            float d1 = TriangleSign(px, py, a, b);
-            float d2 = TriangleSign(px, py, b, c);
-            float d3 = TriangleSign(px, py, c, a);
-            bool hasNeg = d1 < 0f || d2 < 0f || d3 < 0f;
-            bool hasPos = d1 > 0f || d2 > 0f || d3 > 0f;
-            return hasNeg && hasPos ? 0f : 1f;
-        }
-
-        private static float TriangleSign(float px, float py, Vector2 p1, Vector2 p2) =>
-            (px - p2.x) * (p1.y - p2.y) - (p1.x - p2.x) * (py - p2.y);
     }
 }

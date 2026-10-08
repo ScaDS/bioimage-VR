@@ -1,29 +1,55 @@
+using System;
 using System.IO;
+using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // "i" knopf unten links (siehe SetupSidePanel.CreateCornerIcons) togglet ein text-
-    // overlay mit dem rohen inhalt von metadata.json fuers gerade geladene volumen.
-    // roh statt in einzelne felder geparst, weil JsonUtility keine dictionaries kann
-    // (key_values ist ein freies key-value-objekt, siehe fetch_from_idr.fetch_metadata)
-    // und die datei ohnehin schon huebsch mit indent=2 formatiert ist
+    // karte "Current image" oben im images tab, das wichtigste aus metadata.json
+    // name, groesse, voxelgroesse, kanaele. anzeige kommt vom SidePanelController
     public class VolumeMetadataPanel : MonoBehaviour
     {
         [SerializeField] private VolumeView volumeView;
-        [SerializeField] private Button infoButton;
-        [SerializeField] private GameObject panelGO;
-        [SerializeField] private Text metadataText;
 
-        private void Awake()
+        private TMP_Text titleText;
+        private TMP_Text detailText;
+
+        [Serializable] private class Metadata
         {
-            if (infoButton != null) infoButton.onClick.AddListener(Toggle);
+            public string name;
+            public int image_id;
+            public Size size;
+            public Voxel voxel_size_um;
+            public string[] channels;
+            public string source;
+        }
+
+        [Serializable] private class Size { public int x, y, z, c; }
+        [Serializable] private class Voxel { public float x, y, z; }
+
+        // kanalnamen aus metadata.json, frisch gelesen, null wenn keine da
+        public string[] ChannelNames
+        {
+            get
+            {
+                string path = volumeView != null ? volumeView.ResolvedVolumePath ?? volumeView.VolumeFilePath : null;
+                if (string.IsNullOrEmpty(path)) return null;
+                string stem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(path));
+                return ReadMetadata(path, stem)?.channels;
+            }
+        }
+
+        public void Bind(TMP_Text title, TMP_Text details)
+        {
+            titleText = title;
+            detailText = details;
+            Refresh();
         }
 
         private void OnEnable()
         {
             if (volumeView != null) volumeView.OnVolumeLoaded += HandleVolumeLoaded;
+            Refresh();
         }
 
         private void OnDisable()
@@ -31,43 +57,54 @@ namespace BioimageVR
             if (volumeView != null) volumeView.OnVolumeLoaded -= HandleVolumeLoaded;
         }
 
-        // neues volumen waehrend die tafel offen ist -> gleich mit aktualisieren, sonst
-        // zeigt sie noch die metadaten vom vorherigen bild
-        private void HandleVolumeLoaded(NiftiVolumeLoader.Volume volume)
-        {
-            if (panelGO != null && panelGO.activeSelf) Refresh();
-        }
+        private void HandleVolumeLoaded(NiftiVolumeLoader.Volume volume) => Refresh();
 
-        private void Toggle()
-        {
-            if (panelGO == null) return;
-            bool willOpen = !panelGO.activeSelf;
-            panelGO.SetActive(willOpen);
-            if (willOpen) Refresh();
-        }
-
-        // <name>_metadata.json zuerst (android, flach im persistentDataPath gepusht,
-        // siehe fetch_from_idr.push_one), sonst metadata.json im selben ordner
-        // (editor/standalone, ein ordner pro bild, siehe fetch_from_idr.fetch_one)
+        // <name>_metadata.json zuerst (android, flach im persistentDataPath gepusht),
+        // sonst metadata.json im selben ordner (editor, ein ordner pro bild)
         private void Refresh()
         {
-            if (metadataText == null) return;
-            string volumePath = volumeView != null ? volumeView.VolumeFilePath : null;
-            if (string.IsNullOrEmpty(volumePath))
+            if (titleText == null || volumeView == null) return;
+            NiftiVolumeLoader.Volume vol = volumeView.LoadedVolume;
+            string volumePath = volumeView.ResolvedVolumePath ?? volumeView.VolumeFilePath;
+            if (vol == null || string.IsNullOrEmpty(volumePath))
             {
-                metadataText.text = "(kein Volumen geladen)";
+                titleText.text = "No image loaded";
+                detailText.text = "Pick one below or send one from napari.";
                 return;
             }
 
-            string dir = Path.GetDirectoryName(volumePath) ?? "";
             string stem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(volumePath));
+            Metadata meta = ReadMetadata(volumePath, stem);
+            string mono = UITheme.FontAssetName(UITheme.FontRole.Mono);
+
+            string title = meta?.name ?? stem;
+            if (meta != null && meta.image_id > 0) title += $"  ·  IDR {meta.image_id}";
+            titleText.text = title;
+
+            string voxel = volumeView.HasPhysicalVoxelSize
+                ? $"{vol.VoxelSize.x:0.###} × {vol.VoxelSize.y:0.###} × {vol.VoxelSize.z:0.###} {volumeView.Unit}"
+                : "voxel size unknown";
+            string channels = meta?.channels != null && meta.channels.Length > 0 ? string.Join(" · ", meta.channels)
+                : vol.IsLiveChannels ? "3 channels" : vol.IsColor ? "colour" : "1 channel";
+            string labels = vol.Labels != null ? $"\n{vol.LabelCount} segmented cells" : "";
+            detailText.text = $"{channels}\n<font=\"{mono}\">{vol.SizeX} × {vol.SizeY} × {vol.SizeZ} · {voxel}</font>{labels}";
+        }
+
+        private static Metadata ReadMetadata(string volumePath, string stem)
+        {
+            string dir = Path.GetDirectoryName(volumePath) ?? "";
             string namedPath = Path.Combine(dir, $"{stem}_metadata.json");
             string sharedPath = Path.Combine(dir, "metadata.json");
             string path = File.Exists(namedPath) ? namedPath : File.Exists(sharedPath) ? sharedPath : null;
-
-            metadataText.text = path != null
-                ? File.ReadAllText(path)
-                : "(keine Metadaten fuer dieses Bild gefunden)";
+            if (path == null) return null;
+            try
+            {
+                return JsonUtility.FromJson<Metadata>(File.ReadAllText(path));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
     }
 }

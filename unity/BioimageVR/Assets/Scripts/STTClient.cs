@@ -31,7 +31,7 @@ namespace BioimageVR
         {
             if (string.IsNullOrEmpty(apiKey))
             {
-                onError?.Invoke("Kein API-Key geladen (siehe ~/.scadsai-api-key).");
+                onError?.Invoke("No API key loaded, see ~/.scadsai-api-key.");
                 yield break;
             }
 

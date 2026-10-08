@@ -1,0 +1,10 @@
+name: napari-bioimage-vr
+display_name: Bioimage VR
+contributions:
+  commands:
+    - id: napari-bioimage-vr.widget
+      python_name: napari_bioimage_vr._widget:BioimageVRWidget
+      title: Bioimage VR
+  widgets:
+    - command: napari-bioimage-vr.widget
+      display_name: Bioimage VR

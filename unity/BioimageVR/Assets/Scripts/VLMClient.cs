@@ -67,7 +67,7 @@ namespace BioimageVR
         {
             if (string.IsNullOrEmpty(apiKey))
             {
-                onError?.Invoke("Kein API-Key geladen (siehe ~/.scadsai-api-key).");
+                onError?.Invoke("No API key loaded, see ~/.scadsai-api-key.");
                 yield break;
             }
 
@@ -157,7 +157,7 @@ namespace BioimageVR
                     return;
                 }
 
-                onTextAnswer?.Invoke(message?.content ?? "(keine Antwort erhalten)");
+                onTextAnswer?.Invoke(message?.content ?? "(no answer received)");
             }
             catch (Exception e)
             {

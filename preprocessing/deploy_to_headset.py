@@ -67,6 +67,13 @@ def check_single_device(adb: str) -> None:
         )
 
 
+def setup_usb_reverse(adb: str, port: int = 8000) -> None:
+    """brille erreicht den server dann ueber das kabel unter http://localhost:<port>,
+    ohne gemeinsames wlan. muss nach jedem neu einstecken wieder laufen"""
+    check_single_device(adb)
+    subprocess.run([adb, "reverse", f"tcp:{port}", f"tcp:{port}"], check=True, capture_output=True)
+
+
 def push_to_device(adb: str, local_path: Path, package: str, remote_name: str | None = None) -> None:
     remote_dir = f"/sdcard/Android/data/{package}/files"
     remote_path = f"{remote_dir}/{remote_name or local_path.name}"
@@ -127,10 +134,17 @@ def main() -> None:
     if thumbnail_path.is_file():
         push_to_device(adb, thumbnail_path, args.package)
 
-    metadata_path = output_path.with_name("metadata.json")
-    if metadata_path.is_file():
-        remote_name = f"{output_path.stem.removesuffix('.nii')}_metadata.json"
-        push_to_device(adb, metadata_path, args.package, remote_name=remote_name)
+    # <name>_metadata.json von convert_to_volume, sonst metadata.json aus einem idr ordner
+    remote_name = f"{output_path.stem.removesuffix('.nii')}_metadata.json"
+    for metadata_path in (output_path.with_name(remote_name), output_path.with_name("metadata.json")):
+        if metadata_path.is_file():
+            push_to_device(adb, metadata_path, args.package, remote_name=remote_name)
+            break
+
+    # flugweg von find_fly_path.py, falls einer gerechnet wurde
+    fly_path = output_path.with_name(f"{output_path.stem.removesuffix('.nii')}_flypath.json")
+    if fly_path.is_file():
+        push_to_device(adb, fly_path, args.package)
 
     ensure_api_key_pushed(adb, args.package)
     print(

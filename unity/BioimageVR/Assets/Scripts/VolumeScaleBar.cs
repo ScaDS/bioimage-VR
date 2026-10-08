@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 
 namespace BioimageVR
@@ -11,7 +12,7 @@ namespace BioimageVR
     {
         [SerializeField] private Transform volumeTransform;
         [SerializeField] private VolumeView volumeView;
-        [SerializeField] private TextMesh label;
+        [SerializeField] private TMP_Text label;
         [SerializeField] private float barWorldLength = 0.12f;
 
         private Vector3 baseScaleAtLoad = Vector3.one;
@@ -50,16 +51,9 @@ namespace BioimageVR
             if (volumeTransform == null || label == null || Mathf.Approximately(baseScaleAtLoad.x, 0f)) return;
 
             float currentZoomFactor = volumeTransform.localScale.x / baseScaleAtLoad.x;
-            float umPerWorldUnit = maxDimensionUm / Mathf.Max(currentZoomFactor, 0.0001f);
-            float representedUm = barWorldLength * umPerWorldUnit;
-            label.text = FormatDistance(representedUm);
-        }
-
-        private static string FormatDistance(float um)
-        {
-            if (um >= 1000f) return $"{um / 1000f:0.#} mm";
-            if (um >= 1f) return $"{um:0.#} µm";
-            return $"{um * 1000f:0} nm";
+            float unitsPerWorldUnit = maxDimensionUm / Mathf.Max(currentZoomFactor, 0.0001f);
+            // maxDimensionUm ist in der einheit des bilds, siehe VolumeView.Unit
+            label.text = Units.Length(barWorldLength * unitsPerWorldUnit, volumeView != null ? volumeView.Unit : "µm", "0.#");
         }
     }
 }

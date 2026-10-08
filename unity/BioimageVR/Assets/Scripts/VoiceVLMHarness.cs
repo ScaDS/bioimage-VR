@@ -73,12 +73,12 @@ namespace BioimageVR
         {
             if (Microphone.devices.Length == 0)
             {
-                SetStatus("Kein Mikrofon gefunden.");
+                SetStatus("No microphone found.");
                 return;
             }
 
             isRecording = true;
-            SetStatus("Aufnahme läuft ...");
+            SetStatus("Listening ...");
             recordingClip = Microphone.Start(null, false, maxRecordSeconds, sampleRate);
         }
 
@@ -90,7 +90,7 @@ namespace BioimageVR
 
             if (recordingClip == null || recordedSamples <= 0)
             {
-                SetStatus("Keine Aufnahme (zu kurz oder kein Mikrofon).");
+                SetStatus("Nothing recorded, too short or no microphone.");
                 return;
             }
 
@@ -100,7 +100,7 @@ namespace BioimageVR
         private IEnumerator TranscribeCaptureAndAsk(AudioClip clip)
         {
             requestInFlight = true;
-            SetStatus("Transkribiere Frage ...");
+            SetStatus("Transcribing ...");
 
             string question = null;
             string sttError = null;
@@ -113,15 +113,15 @@ namespace BioimageVR
 
             if (sttError != null)
             {
-                SetStatus($"STT-Fehler: {sttError}");
-                chatPanel?.AddSystemMessage($"STT-Fehler: {sttError}");
+                SetStatus($"Speech recognition failed: {sttError}");
+                chatPanel?.AddSystemMessage($"Speech recognition failed: {sttError}");
                 requestInFlight = false;
                 yield break;
             }
             if (string.IsNullOrWhiteSpace(question))
             {
-                SetStatus("Keine Sprache erkannt.");
-                chatPanel?.AddSystemMessage("Keine Sprache erkannt.");
+                SetStatus("No speech recognised.");
+                chatPanel?.AddSystemMessage("No speech recognised.");
                 requestInFlight = false;
                 yield break;
             }
@@ -132,7 +132,7 @@ namespace BioimageVR
             int? currentImageId = CurrentIdrImageId();
             if (currentImageId.HasValue)
             {
-                SetStatus($"Frage: \"{question}\" - hole Kontext ...");
+                SetStatus($"\"{question}\" · looking up context ...");
                 bool ragDone = false;
                 ragClient.FetchContext(question, currentImageId.Value, (result, error) =>
                 {
@@ -143,17 +143,17 @@ namespace BioimageVR
                 yield return new WaitUntil(() => ragDone);
             }
 
-            SetStatus($"Frage: \"{question}\" - nehme Screenshot auf ...");
+            SetStatus($"\"{question}\" · capturing the view ...");
             // frame warten, sonst landet der statustext im screenshot
             yield return null;
             yield return new WaitForEndOfFrame();
             Texture2D screenshot = SceneScreenshot.Capture(Camera.main);
 
-            SetStatus($"Frage: \"{question}\" - frage das VLM ...");
+            SetStatus($"\"{question}\" · asking the assistant ...");
             vlmClient.AskAboutImage(screenshot, question, context, VLMToolDispatcher.Tools,
                 onTextAnswer: answer =>
                 {
-                    SetStatus($"F: {question}\nA: {answer}");
+                    SetStatus("Answer is in the chat");
                     chatPanel?.AddAssistantMessage(answer);
                     Destroy(screenshot);
                     requestInFlight = false;
@@ -164,15 +164,15 @@ namespace BioimageVR
                     foreach (ToolCall call in calls)
                         confirmations.Add(toolDispatcher != null ? toolDispatcher.Execute(call) : $"({call.Name} nicht verkabelt)");
                     string summary = string.Join(" ", confirmations);
-                    SetStatus($"F: {question}\nA: {summary}");
+                    SetStatus("Answer is in the chat");
                     chatPanel?.AddAssistantMessage(summary);
                     Destroy(screenshot);
                     requestInFlight = false;
                 },
                 onError: error =>
                 {
-                    SetStatus($"Fehler: {error}");
-                    chatPanel?.AddSystemMessage($"Fehler: {error}");
+                    SetStatus($"Assistant error: {error}");
+                    chatPanel?.AddSystemMessage($"Assistant error: {error}");
                     Destroy(screenshot);
                     requestInFlight = false;
                 });
@@ -200,8 +200,14 @@ namespace BioimageVR
             return trimmed;
         }
 
+        // letzte statusmeldung, die Assistant hinweiszeile am volumen zeigt sie an
+        public string Status { get; private set; } = "";
+        public float StatusTime { get; private set; }
+
         private void SetStatus(string text)
         {
+            Status = text;
+            StatusTime = Time.time;
             Debug.Log($"[VoiceVLM] {text}");
             if (responseText != null) responseText.text = text;
         }

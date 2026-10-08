@@ -13,6 +13,8 @@ namespace BioimageVR
         public class Volume
         {
             public Texture3D Texture;
+            // hellster wert je block, siehe ComputeBricks
+            public Texture3D BrickTexture;
             public int SizeX;
             public int SizeY;
             public int SizeZ;
@@ -37,6 +39,11 @@ namespace BioimageVR
             public int MaxLabel;
             // anzahl verschiedener ids ausser 0, ids koennen luecken haben
             public int LabelCount;
+            // werte pro zelle, index ist die id, siehe CellStats
+            public CellInfo[] Cells;
+            // verdacht auf zwei ineinandergepresste zellen, siehe CellShapeAnalysis
+            // null bis die analyse nach dem laden im hintergrund fertig ist
+            public SplitHint[] SplitHints;
         }
 
         // label maske ohne textur, von jedem thread aus erzeugbar
@@ -178,6 +185,68 @@ namespace BioimageVR
                 filterMode = FilterMode.Point
             };
             texture.SetPixelData(rg, 0);
+            texture.Apply(false, true);
+            return texture;
+        }
+
+        // hellster wert je block von BrickSize voxeln, fuer das ueberspringen leerer bereiche im shader
+        // jeder block schaut BrickMargin voxel ueber den rand, die weiche filterung greift so weit
+        public const int BrickSize = 8;
+        private const int BrickMargin = 2;
+
+        public class BrickMap
+        {
+            public int CountX;
+            public int CountY;
+            public int CountZ;
+            public byte[] Max;
+        }
+
+        // reine cpu arbeit, laeuft im ladethread
+        public static BrickMap ComputeBricks(RawVolumeData data)
+        {
+            int sx = data.SizeX, sy = data.SizeY, sz = data.SizeZ;
+            int bx = (sx + BrickSize - 1) / BrickSize;
+            int by = (sy + BrickSize - 1) / BrickSize;
+            int bz = (sz + BrickSize - 1) / BrickSize;
+
+            // erst ohne rand pro voxel zeile, dann den rand ueber benachbarte bloecke nachziehen
+            // waere schneller, bei 8er bloecken mit 2er rand ist direkt aber schnell genug
+            var max = new byte[bx * by * bz];
+            byte[] v = data.Voxels;
+            bool color = data.IsColor;
+            for (int k = 0; k < bz; k++)
+            for (int j = 0; j < by; j++)
+            for (int i = 0; i < bx; i++)
+            {
+                int x0 = Math.Max(i * BrickSize - BrickMargin, 0), x1 = Math.Min((i + 1) * BrickSize + BrickMargin, sx);
+                int y0 = Math.Max(j * BrickSize - BrickMargin, 0), y1 = Math.Min((j + 1) * BrickSize + BrickMargin, sy);
+                int z0 = Math.Max(k * BrickSize - BrickMargin, 0), z1 = Math.Min((k + 1) * BrickSize + BrickMargin, sz);
+                int m = 0;
+                for (int z = z0; z < z1 && m < 255; z++)
+                for (int y = y0; y < y1; y++)
+                {
+                    int row = sx * (y + sy * z);
+                    for (int x = x0; x < x1; x++)
+                    {
+                        int idx = row + x;
+                        int value = color ? Math.Max(v[idx * 3], Math.Max(v[idx * 3 + 1], v[idx * 3 + 2])) : v[idx];
+                        if (value > m) m = value;
+                    }
+                }
+                max[i + bx * (j + by * k)] = (byte)m;
+            }
+            return new BrickMap { CountX = bx, CountY = by, CountZ = bz, Max = max };
+        }
+
+        public static Texture3D BuildBrickTexture(BrickMap bricks)
+        {
+            var texture = new Texture3D(bricks.CountX, bricks.CountY, bricks.CountZ, TextureFormat.R8, false)
+            {
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Point
+            };
+            texture.SetPixelData(bricks.Max, 0);
             texture.Apply(false, true);
             return texture;
         }

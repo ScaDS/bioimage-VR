@@ -30,6 +30,9 @@ namespace BioimageVR
         [Tooltip("wlan adresse von preprocessing/upload_server.py, siehe dessen konsolenausgabe beim start")]
         [SerializeField] private string serverBaseUrl = "http://192.168.1.23:8000";
 
+        // gleiche adresse nutzt auch VrBridge, nur an einer stelle eintragen
+        public string ServerBaseUrl => serverBaseUrl.TrimEnd('/');
+
         [Serializable] private class ListResponse
         {
             public IdrItem[] items;

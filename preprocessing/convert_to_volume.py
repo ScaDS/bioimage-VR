@@ -84,6 +84,11 @@ def is_remote(input_path: str) -> bool:
     return "://" in input_path
 
 
+def is_zarr_folder(path: Path) -> bool:
+    """zarr v2 hat .zgroup oder .zattrs im ordner, v3 eine zarr.json"""
+    return path.suffix.lower() == ".zarr" or any((path / marker).exists() for marker in (".zgroup", ".zattrs", "zarr.json"))
+
+
 def load_folder(path: Path, max_voxels: int = MAX_VOXELS) -> np.ndarray:
     """ordner mit slices laden, sortiert, zu einem array. bereits farbige slices
     (z.b. gerenderte screenshots) bleiben rgb statt auf grau reduziert zu werden"""
@@ -213,7 +218,8 @@ def convert(input_path: str, output_path: Path, denoise: bool = True, max_voxels
         live_channels = volume.ndim == 4
     else:
         local_path = Path(input_path)
-        if local_path.is_dir():
+        # ein lokales zarr ist auch ein ordner, aber kein stapel aus einzelbildern
+        if local_path.is_dir() and not is_zarr_folder(local_path):
             volume = load_folder(local_path, max_voxels=max_voxels)
             live_channels = False  # bereits fertige farbbilder, keine rohen kanaele zum mischen
         else:
@@ -231,6 +237,84 @@ def convert(input_path: str, output_path: Path, denoise: bool = True, max_voxels
     return volume
 
 
+def convert_array(volume_czyx: np.ndarray, output_path: Path, denoise: bool = False,
+                  max_voxels: int = MAX_VOXELS) -> np.ndarray:
+    """schon geladenes (c,z,y,x) array statt datei, z.b. layer aus napari (siehe
+    upload_server /vr/push). gleiche kette wie convert(): budget, kanaele, strecken.
+    entrauschen hier standardmaessig aus, napari daten sind meist schon aufbereitet.
+    gibt das geschriebene volumen als (z,y,x) bzw (z,y,x,3) zurueck"""
+    if volume_czyx.ndim != 4:
+        raise ValueError(f"Expected a (c,z,y,x) array, got shape {volume_czyx.shape}")
+    volume = _downsample_to_budget(volume_czyx, max_voxels, channel_axis=0)
+    volume = _composite_channels(volume, denoise=denoise)
+    live_channels = volume.ndim == 4
+    if volume.ndim == 3:
+        volume = normalize_to_uint8(volume, denoise=denoise)
+
+    image = _to_nifti_image(volume, live_channels=live_channels)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    nib.save(image, str(output_path))
+    return volume
+
+
+# einheiten die die app kennt, umrechnung nach um fuer das alte feld voxel_size_um
+UNIT_TO_UM = {"nm": 0.001, "um": 1.0, "µm": 1.0, "micron": 1.0, "mm": 1000.0, "cm": 10000.0}
+
+
+def read_tiff_spacing(path: str) -> tuple[list[float], str, tuple[int, ...]] | None:
+    """voxelgroesse (z,y,x), einheit und form aus einem imagej tiff, sonst None.
+    z steht in imagej 'spacing', x und y als pixel pro einheit in X- und YResolution"""
+    if is_remote(path) or Path(path).suffix.lower() not in (".tif", ".tiff"):
+        return None
+    import tifffile
+
+    with tifffile.TiffFile(path) as tif:
+        meta = tif.imagej_metadata or {}
+        page = tif.pages[0]
+        series = tif.series[0]
+        # ueber die achsennamen, bei mehrkanal stapeln (ZCYX) ist shape[-3] sonst der kanal
+        dims = dict(zip(series.axes, series.shape))
+        shape = (dims.get("Z", 1), dims.get("Y", series.shape[-2]), dims.get("X", series.shape[-1]))
+        unit = str(meta.get("unit", "")).replace("\\u00B5", "µ").strip()
+        if not unit or unit == "pixel":
+            return None
+
+        def per_unit(tag: str) -> float | None:
+            if tag not in page.tags:
+                return None
+            num, den = page.tags[tag].value
+            return den / num if num else None
+
+        x, y = per_unit("XResolution"), per_unit("YResolution")
+        z = float(meta.get("spacing", x or 1.0))
+        if x is None or y is None:
+            return None
+    return [z, y, x], unit, shape
+
+
+def write_metadata(output_path: Path, voxel_zyx: list[float], unit: str, shape_zyx: tuple[int, ...],
+                   channels: list[str] | None = None) -> Path:
+    """<stem>_metadata.json neben das volumen, gleiche benennung wie auf der brille.
+    voxel_size in der originaleinheit plus voxel_size_um fuer aeltere app staende"""
+    import json
+
+    stem = output_path.name.removesuffix(".gz").removesuffix(".nii")
+    to_um = UNIT_TO_UM.get(unit, 1.0)
+    unit = "µm" if unit in ("um", "micron") else unit
+    metadata = {
+        "name": stem,
+        "source": "file",
+        "size": {"x": shape_zyx[2], "y": shape_zyx[1], "z": shape_zyx[0]},
+        "unit": unit,
+        "voxel_size": {"x": voxel_zyx[2], "y": voxel_zyx[1], "z": voxel_zyx[0]},
+        "voxel_size_um": {"x": voxel_zyx[2] * to_um, "y": voxel_zyx[1] * to_um, "z": voxel_zyx[0] * to_um},
+        "channels": channels or [],
+    }
+    path = output_path.with_name(f"{stem}_metadata.json")
+    path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input_path", help="2D slice folder, a single stack file, or a remote URL (e.g. OME-Zarr)")
@@ -239,11 +323,28 @@ def main() -> None:
                          help="Median-Filter vor dem Kontrast-Strecken deaktivieren (zum Vergleichen)")
     parser.add_argument("--max-voxels", type=int, default=MAX_VOXELS,
                          help=f"Downsample-Schwelle in raeumlichen Voxeln, Standard {MAX_VOXELS:,} (siehe MAX_VOXELS)")
+    parser.add_argument("--voxel-size", type=float, nargs=3, metavar=("X", "Y", "Z"),
+                         help="Voxelgroesse, falls die Datei keine mitbringt (ImageJ-TIFFs werden automatisch gelesen)")
+    parser.add_argument("--unit", default="um", help="Einheit zu --voxel-size, z.B. um oder mm")
     parser.set_defaults(denoise=True)
     args = parser.parse_args()
 
     volume = convert(args.input_path, args.output_path, denoise=args.denoise, max_voxels=args.max_voxels)
     print(f"Wrote {args.output_path} - shape={volume.shape} dtype={volume.dtype}")
+
+    written_zyx = tuple(volume.shape[:3])
+    spacing = None
+    if args.voxel_size:
+        x, y, z = args.voxel_size
+        spacing = ([z, y, x], args.unit, written_zyx)
+    else:
+        spacing = read_tiff_spacing(args.input_path)
+    if spacing:
+        voxel_zyx, unit, original_zyx = spacing
+        # verkleinert heisst groessere voxel
+        voxel_zyx = [v * o / w for v, o, w in zip(voxel_zyx, original_zyx, written_zyx)]
+        path = write_metadata(args.output_path, voxel_zyx, unit, written_zyx)
+        print(f"Wrote {path} - voxel {voxel_zyx} {unit} (z,y,x)")
 
 
 if __name__ == "__main__":

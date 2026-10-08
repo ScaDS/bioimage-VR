@@ -50,9 +50,10 @@ namespace BioimageVR
             {
                 Name = "set_render_mode",
                 Description = "Wechselt den Render-Modus zwischen durchscheinender Darstellung (translucent) " +
-                              "und Maximum-Intensity-Projection (mip, zeigt pro Sichtstrahl nur den hellsten Punkt).",
+                              "Maximum-Intensity-Projection (mip, zeigt pro Sichtstrahl nur den hellsten Punkt) " +
+                              "und Oberflaeche (surface, erste Wand ueber dem Schwellwert wie beim Endoskop).",
                 ParametersJson = "{\"type\":\"object\",\"properties\":{\"mode\":{\"type\":\"string\"," +
-                                  "\"enum\":[\"translucent\",\"mip\"]}},\"required\":[\"mode\"]}"
+                                  "\"enum\":[\"translucent\",\"mip\",\"surface\"]}},\"required\":[\"mode\"]}"
             },
             new ToolDefinition
             {
@@ -100,9 +101,10 @@ namespace BioimageVR
                     case "set_render_mode":
                     {
                         var args = JsonUtility.FromJson<RenderModeArgs>(call.ArgumentsJson);
-                        bool mip = args.mode == "mip";
-                        renderControls?.SetRenderModeExternal(mip);
-                        return $"Render Mode: {(mip ? "MIP" : "Translucent")}.";
+                        VolumeRenderControls.Mode mode = args.mode == "mip" ? VolumeRenderControls.Mode.Mip
+                            : args.mode == "surface" ? VolumeRenderControls.Mode.Surface : VolumeRenderControls.Mode.Volume;
+                        renderControls?.SetRenderModeExternal(mode);
+                        return $"Render Mode: {mode}.";
                     }
                     case "set_shading":
                     {

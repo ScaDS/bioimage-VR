@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f6a75d1f5ff90154ea2a8e58222a1f59, type: 3}
   m_Name: FoveatedRenderingFeature Android
   m_EditorClassIdentifier: Unity.XR.OpenXR::UnityEngine.XR.OpenXR.Features.FoveatedRenderingFeature
-  m_enabled: 0
+  m_enabled: 1
   nameUi: Foveated Rendering
   version: 1
   featureIdInternal: com.unity.openxr.feature.foveatedrendering
@@ -474,7 +474,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f6a75d1f5ff90154ea2a8e58222a1f59, type: 3}
   m_Name: FoveatedRenderingFeature Android
   m_EditorClassIdentifier: Unity.XR.OpenXR::UnityEngine.XR.OpenXR.Features.FoveatedRenderingFeature
-  m_enabled: 0
+  m_enabled: 1
   nameUi: Foveated Rendering
   version: 1
   featureIdInternal: com.unity.openxr.feature.foveatedrendering
@@ -1545,19 +1545,19 @@ MonoBehaviour:
   m_EditorClassIdentifier: Unity.XR.OpenXR::UnityEngine.XR.OpenXR.OpenXRSettings
   features:
   - {fileID: 4226505276498056587}
-  - {fileID: 5080318077435028046}
+  - {fileID: 1683718810548228235}
   - {fileID: 9037709391781920469}
-  - {fileID: 3458242953224473889}
+  - {fileID: -7626569951043110197}
   - {fileID: -6681142777781920125}
-  - {fileID: -4833390992789744532}
+  - {fileID: -9135386954708991215}
   - {fileID: -4431256371582635112}
   - {fileID: -6009226434659587492}
   - {fileID: 7876057616153427194}
   - {fileID: 5980205257801951462}
   - {fileID: 367436018536373199}
-  - {fileID: -5069066120091060036}
+  - {fileID: -9163362106065455709}
   - {fileID: -8055297378342942418}
-  - {fileID: 4258024766910276137}
+  - {fileID: 271662879289476800}
   - {fileID: 3654608152575470306}
   - {fileID: -8726541596459984292}
   - {fileID: 3176292628953706711}
@@ -1571,9 +1571,9 @@ MonoBehaviour:
   - {fileID: -2282904327521853219}
   - {fileID: -1628311546123798910}
   - {fileID: -1039092995905966849}
-  - {fileID: -666511724934367790}
+  - {fileID: -7111012533013601760}
   - {fileID: -8669578261780134786}
-  - {fileID: 5946996653752810243}
+  - {fileID: 62047606730506086}
   - {fileID: -1608333482439166649}
   - {fileID: 2885261542665051502}
   - {fileID: 7572047339687718204}

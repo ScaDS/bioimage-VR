@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.Networking;
@@ -9,14 +10,16 @@ namespace BioimageVR
 {
     // baut fuer jedes gefundene volumen eine klickbare zeile in listContainer
     // klicken laedt es direkt in volumeView, kein umweg ueber tasten
-    // zwei quellen umschaltbar oben in der liste: lokal (VolumeLibrary.Discover) oder
+    // zwei quellen umschaltbar oben in der liste: auf dem geraet (VolumeLibrary.Discover) oder
     // direkt aus dem idr katalog durchklicken (IdrClient, gleicher server wie
     // preprocessing/upload_server.py, nur ohne adb/usb - siehe IdrClient.cs)
+    // liste kommt vom SidePanelController, der den images tab zur laufzeit baut
     public class VolumeGalleryMenu : MonoBehaviour
     {
         [SerializeField] private VolumeView volumeView;
-        [SerializeField] private RectTransform listContainer;
         [SerializeField] private IdrClient idrClient;
+
+        private RectTransform listContainer;
 
         private enum Source { Local, Idr }
         private Source source = Source.Local;
@@ -31,9 +34,12 @@ namespace BioimageVR
         private string idrDatasetName;
         private int idrOffset;
         private const int IdrPageSize = 30;
+        private const float RowHeight = 88f;
+        private const float ThumbnailSize = 64f;
 
-        private void Start()
+        public void Bind(RectTransform container)
         {
+            listContainer = container;
             Refresh();
         }
 
@@ -41,7 +47,7 @@ namespace BioimageVR
         {
             if (listContainer == null) return;
             Clear();
-            CreateSourceSwitchRow();
+            CreateSourceSwitch();
 
             if (source == Source.Local) RefreshLocal();
             else RefreshIdr();
@@ -52,43 +58,11 @@ namespace BioimageVR
             foreach (Transform child in listContainer) Destroy(child.gameObject);
         }
 
-        private void CreateSourceSwitchRow()
+        private void CreateSourceSwitch()
         {
-            var rowGO = new GameObject("SourceSwitch", typeof(HorizontalLayoutGroup), typeof(LayoutElement));
-            rowGO.transform.SetParent(listContainer, false);
-            rowGO.GetComponent<LayoutElement>().minHeight = 48f;
-            var layout = rowGO.GetComponent<HorizontalLayoutGroup>();
-            layout.spacing = 8f;
-            layout.childForceExpandWidth = true;
-            layout.childForceExpandHeight = true;
-
-            CreateSwitchButton(rowGO.transform, "Lokal", source == Source.Local, () => SwitchSource(Source.Local));
-            CreateSwitchButton(rowGO.transform, "Aus IDR", source == Source.Idr, () => SwitchSource(Source.Idr));
-        }
-
-        private void CreateSwitchButton(Transform parent, string label, bool active, UnityAction onClick)
-        {
-            var go = new GameObject(label + "Button", typeof(Image), typeof(Button));
-            go.transform.SetParent(parent, false);
-            var image = go.GetComponent<Image>();
-            image.sprite = UITheme.RoundedSprite(10);
-            image.type = Image.Type.Sliced;
-            image.color = Color.white;
-
-            var text = CreateLabel(label, go.transform);
-            text.alignment = TextAnchor.MiddleCenter;
-            text.fontSize = 20;
-
-            var button = go.GetComponent<Button>();
-            button.targetGraphic = image;
-            button.onClick.AddListener(onClick);
-            var colors = button.colors;
-            colors.normalColor = active ? UITheme.AccentSoft : UITheme.Surface;
-            colors.highlightedColor = UITheme.SurfaceHover;
-            colors.pressedColor = UITheme.SurfacePressed;
-            colors.selectedColor = colors.normalColor;
-            colors.fadeDuration = 0.08f;
-            button.colors = colors;
+            UISegmented segmented = UIKit.Segmented(listContainer, "Source", "On device", "IDR");
+            segmented.SetWithoutNotify(source == Source.Local ? 0 : 1);
+            segmented.SelectionChanged += index => SwitchSource(index == 0 ? Source.Local : Source.Idr);
         }
 
         private void SwitchSource(Source newSource)
@@ -110,55 +84,61 @@ namespace BioimageVR
             var entries = VolumeLibrary.Discover();
             if (entries.Count == 0)
             {
-                CreateLabel("(keine volumen gefunden)");
+                Message("No images on this device yet. Send one from napari or the upload page.");
                 return;
             }
-            foreach (var entry in entries) CreateLocalRow(entry);
+            string current = volumeView != null ? volumeView.VolumeFilePath : null;
+            foreach (var entry in entries)
+            {
+                bool selected = !string.IsNullOrEmpty(current) && System.IO.Path.GetFileName(current) == System.IO.Path.GetFileName(entry.Path);
+                Button row = Row(entry.DisplayName, null, entry.HasLabels ? "Segmentation" : null, selected,
+                    () => volumeView.LoadVolume(entry.Path), out RawImage thumbnail);
+                if (!string.IsNullOrEmpty(entry.ThumbnailPath))
+                    StartCoroutine(LoadThumbnail(thumbnail, "file:///" + entry.ThumbnailPath.Replace('\\', '/')));
+            }
         }
 
-        private void CreateLocalRow(VolumeLibrary.Entry entry)
+        // zeile mit vorschau, name, optionaler zweiter zeile und chip
+        private Button Row(string title, string subtitle, string chip, bool selected, UnityAction onClick, out RawImage thumbnail)
         {
-            var rowGO = new GameObject(entry.DisplayName, typeof(Image), typeof(Button), typeof(LayoutElement));
-            rowGO.transform.SetParent(listContainer, false);
-            rowGO.GetComponent<LayoutElement>().minHeight = 56f;
+            Button row = UIKit.Button(listContainer, "", selected ? UIKit.ButtonStyle.Secondary : UIKit.ButtonStyle.Borderless,
+                height: RowHeight, name: title);
+            var layout = row.GetComponent<HorizontalLayoutGroup>();
+            layout.padding = new RectOffset(12, 16, 0, 0);
+            layout.spacing = 16f;
+            layout.childAlignment = TextAnchor.MiddleLeft;
 
-            var image = rowGO.GetComponent<Image>();
-            image.sprite = UITheme.RoundedSprite(12);
-            image.type = Image.Type.Sliced;
-            image.color = Color.white; // colorblock unten setzt die eigentliche farbe
+            thumbnail = new GameObject("Thumbnail", typeof(RectTransform), typeof(RawImage)).GetComponent<RawImage>();
+            thumbnail.transform.SetParent(row.transform, false);
+            thumbnail.color = UITheme.Surface;
+            thumbnail.raycastTarget = false;
+            UIKit.Size(thumbnail, ThumbnailSize, ThumbnailSize);
 
-            bool hasThumbnail = !string.IsNullOrEmpty(entry.ThumbnailPath);
-            if (hasThumbnail)
-            {
-                RawImage thumbnail = CreateThumbnail(rowGO.transform);
-                StartCoroutine(LoadThumbnailCoroutine(thumbnail, "file:///" + entry.ThumbnailPath.Replace('\\', '/')));
-            }
-            CreateLabel(entry.DisplayName, rowGO.transform, hasThumbnail ? ThumbnailLabelOffset : DefaultLabelOffset);
+            RectTransform text = UIKit.Stack(row.transform, "Text", true, 4f, align: TextAnchor.MiddleLeft, expandCross: false);
+            UIKit.Size(text, -1, -1, 1f);
+            TextMeshProUGUI name = UIKit.Text(text, title, UIKit.BodySize, UITheme.FontRole.SemiBold);
+            name.textWrappingMode = TextWrappingModes.NoWrap;
+            if (!string.IsNullOrEmpty(subtitle))
+                UIKit.Text(text, subtitle, UIKit.CaptionSize, UITheme.FontRole.Mono, UITheme.TextSecondary);
+            if (!string.IsNullOrEmpty(chip)) UIKit.Chip(text, chip, UITheme.AccentText, UITheme.AccentSoft);
 
-            var button = rowGO.GetComponent<Button>();
-            button.targetGraphic = image;
-            button.onClick.AddListener(() => volumeView.LoadVolume(entry.Path));
-
-            var colors = button.colors;
-            colors.normalColor = UITheme.Surface;
-            colors.highlightedColor = UITheme.SurfaceHover;
-            colors.pressedColor = UITheme.SurfacePressed;
-            colors.selectedColor = UITheme.Surface;
-            colors.fadeDuration = 0.08f;
-            button.colors = colors;
+            row.onClick.AddListener(onClick);
+            // zeile faerbt ihre texte selbst, ContentTint wuerde unterzeile und chip ueberschreiben
+            Destroy(row.GetComponent<ContentTint>());
+            return row;
         }
 
         private void RefreshIdr()
         {
             if (idrClient == null)
             {
-                CreateLabel("(kein IdrClient verkabelt)");
+                Message("IDR browsing needs the upload server on the PC.");
                 return;
             }
 
             idrOffset = 0;
-            CreateBreadcrumbRow();
-            CreateLabel("Lade ...");
+            CreateBreadcrumb();
+            Message("Loading ...");
             idrClient.ListLevel(idrLevel, idrProjectId, idrDatasetId, idrOffset, IdrPageSize,
                 (items, nextOffset, hasMore, error) => OnIdrListLoaded(items, nextOffset, hasMore, error, append: false));
         }
@@ -171,40 +151,17 @@ namespace BioimageVR
                 (items, nextOffset, hasMore, error) => OnIdrListLoaded(items, nextOffset, hasMore, error, append: true));
         }
 
-        private void CreateBreadcrumbRow()
+        private void CreateBreadcrumb()
         {
-            string crumb = "Studien";
-            if (idrProjectId.HasValue) crumb += " > " + (idrProjectName ?? ("#" + idrProjectId));
-            if (idrDatasetId.HasValue) crumb += " > " + (idrDatasetName ?? ("#" + idrDatasetId));
+            string crumb = "Studies";
+            if (idrProjectId.HasValue) crumb += "  ›  " + (idrProjectName ?? ("#" + idrProjectId));
+            if (idrDatasetId.HasValue) crumb += "  ›  " + (idrDatasetName ?? ("#" + idrDatasetId));
 
-            var textRowGO = new GameObject("Breadcrumb", typeof(LayoutElement));
-            textRowGO.transform.SetParent(listContainer, false);
-            textRowGO.GetComponent<LayoutElement>().minHeight = 34f;
-            var text = CreateLabel(crumb, textRowGO.transform);
-            text.color = UITheme.TextSecondary;
-            text.fontSize = 18;
-
-            if (idrLevel == "projects") return;
-
-            var backRowGO = new GameObject("BackRow", typeof(Image), typeof(Button), typeof(LayoutElement));
-            backRowGO.transform.SetParent(listContainer, false);
-            backRowGO.GetComponent<LayoutElement>().minHeight = 44f;
-            var backImage = backRowGO.GetComponent<Image>();
-            backImage.sprite = UITheme.RoundedSprite(10);
-            backImage.type = Image.Type.Sliced;
-            backImage.color = Color.white;
-            CreateLabel("< Zurueck", backRowGO.transform);
-
-            var backButton = backRowGO.GetComponent<Button>();
-            backButton.targetGraphic = backImage;
-            backButton.onClick.AddListener(GoUpOneLevel);
-            var backColors = backButton.colors;
-            backColors.normalColor = UITheme.Surface;
-            backColors.highlightedColor = UITheme.SurfaceHover;
-            backColors.pressedColor = UITheme.SurfacePressed;
-            backColors.selectedColor = backColors.normalColor;
-            backColors.fadeDuration = 0.08f;
-            backButton.colors = backColors;
+            RectTransform row = UIKit.Stack(listContainer, "Breadcrumb", false, 12f, align: TextAnchor.MiddleLeft, expandCross: false);
+            if (idrLevel != "projects")
+                UIKit.Button(row, "Back", UIKit.ButtonStyle.Secondary, height: UIKit.SmallControlHeight).onClick.AddListener(GoUpOneLevel);
+            TextMeshProUGUI text = UIKit.Text(row, crumb, UIKit.LabelSize, color: UITheme.TextSecondary);
+            UIKit.Size(text, -1, -1, 1f);
         }
 
         private void GoUpOneLevel()
@@ -217,11 +174,11 @@ namespace BioimageVR
 
         private void OnIdrListLoaded(List<IdrItem> items, int nextOffset, bool hasMore, string error, bool append)
         {
-            if (this == null) return; // panel evtl. neu gebaut worden waehrend die anfrage lief
+            if (this == null || listContainer == null) return; // panel evtl. neu gebaut worden waehrend die anfrage lief
 
             if (append)
             {
-                // die gerade geklickte "Mehr laden" zeile entfernen, sonst bleibt sie
+                // die gerade geklickte "Load more" zeile entfernen, sonst bleibt sie
                 // mitten in der liste liegen statt ganz unten neu zu erscheinen
                 Transform oldLoadMore = listContainer.Find("LoadMore");
                 if (oldLoadMore != null) Destroy(oldLoadMore.gameObject);
@@ -229,13 +186,13 @@ namespace BioimageVR
             else
             {
                 Clear();
-                CreateSourceSwitchRow();
-                CreateBreadcrumbRow();
+                CreateSourceSwitch();
+                CreateBreadcrumb();
             }
 
             if (!string.IsNullOrEmpty(error))
             {
-                CreateLabel("Fehler: " + error);
+                Message("Could not reach IDR: " + error);
                 return;
             }
 
@@ -246,50 +203,30 @@ namespace BioimageVR
 
             if (!append && items.Count == 0)
             {
-                CreateLabel("(keine Eintraege)");
+                Message("Nothing here.");
                 return;
             }
 
-            foreach (var item in items) CreateIdrRow(item);
-            if (hasMore) CreateLoadMoreRow();
-        }
-
-        private void CreateIdrRow(IdrItem item)
-        {
-            string baseName = item.name ?? ("#" + item.id);
-            var rowGO = new GameObject(baseName, typeof(Image), typeof(Button), typeof(LayoutElement));
-            rowGO.transform.SetParent(listContainer, false);
-            rowGO.GetComponent<LayoutElement>().minHeight = 56f;
-
-            var image = rowGO.GetComponent<Image>();
-            image.sprite = UITheme.RoundedSprite(12);
-            image.type = Image.Type.Sliced;
-            image.color = Color.white;
-
-            bool hasThumbnail = item.preview_image_id > 0;
-            if (hasThumbnail)
+            foreach (var item in items)
             {
-                RawImage thumbnail = CreateThumbnail(rowGO.transform);
-                string url = $"https://idr.openmicroscopy.org/webclient/render_thumbnail/{item.preview_image_id}/";
-                StartCoroutine(LoadThumbnailCoroutine(thumbnail, url));
+                string title = item.name ?? ("#" + item.id);
+                bool noZarr = idrLevel == "images" && !item.has_zarr;
+                Row(title, noZarr ? "no 3D volume available" : $"#{item.id}", null, false, () => OnIdrItemClicked(item),
+                    out RawImage thumbnail);
+                if (item.preview_image_id > 0)
+                    StartCoroutine(LoadThumbnail(thumbnail,
+                        $"https://idr.openmicroscopy.org/webclient/render_thumbnail/{item.preview_image_id}/"));
             }
-
-            bool noZarr = idrLevel == "images" && !item.has_zarr;
-            var text = CreateLabel(noZarr ? baseName + "  (kein Volumen)" : baseName, rowGO.transform,
-                hasThumbnail ? ThumbnailLabelOffset : DefaultLabelOffset);
-            if (noZarr) text.color = UITheme.TextSecondary;
-
-            var button = rowGO.GetComponent<Button>();
-            button.targetGraphic = image;
-            button.onClick.AddListener(() => OnIdrItemClicked(item));
-
-            var colors = button.colors;
-            colors.normalColor = UITheme.Surface;
-            colors.highlightedColor = UITheme.SurfaceHover;
-            colors.pressedColor = UITheme.SurfacePressed;
-            colors.selectedColor = colors.normalColor;
-            colors.fadeDuration = 0.08f;
-            button.colors = colors;
+            if (hasMore)
+            {
+                Button more = UIKit.Button(listContainer, "Load more", UIKit.ButtonStyle.Secondary, name: "LoadMore");
+                more.onClick.AddListener(() =>
+                {
+                    more.interactable = false;
+                    UIKit.SetLabel(more, "Loading ...");
+                    LoadMoreIdr();
+                });
+            }
         }
 
         private void OnIdrItemClicked(IdrItem item)
@@ -319,83 +256,28 @@ namespace BioimageVR
         private void DownloadAndLoad(IdrItem item)
         {
             Clear();
-            CreateSourceSwitchRow();
-            CreateBreadcrumbRow();
-            CreateLabel($"Laedt {(item.name ?? ("#" + item.id))} ... (kann etwas dauern)");
+            CreateSourceSwitch();
+            CreateBreadcrumb();
+            Message($"Loading {(item.name ?? ("#" + item.id))} ... this can take a while");
 
             idrClient.FetchVolume(item.id, (path, error) =>
             {
-                if (this == null) return;
+                if (this == null || listContainer == null) return;
                 if (!string.IsNullOrEmpty(error))
                 {
                     Clear();
-                    CreateSourceSwitchRow();
-                    CreateBreadcrumbRow();
-                    CreateLabel("Fehler beim Laden: " + error);
+                    CreateSourceSwitch();
+                    CreateBreadcrumb();
+                    Message("Download failed: " + error);
                     return;
                 }
                 volumeView.LoadVolume(path);
             });
         }
 
-        private void CreateLoadMoreRow()
-        {
-            var rowGO = new GameObject("LoadMore", typeof(Image), typeof(Button), typeof(LayoutElement));
-            rowGO.transform.SetParent(listContainer, false);
-            rowGO.GetComponent<LayoutElement>().minHeight = 48f;
-            var image = rowGO.GetComponent<Image>();
-            image.sprite = UITheme.RoundedSprite(10);
-            image.type = Image.Type.Sliced;
-            image.color = Color.white;
-            var text = CreateLabel("Mehr laden", rowGO.transform);
-            text.alignment = TextAnchor.MiddleCenter;
-
-            var button = rowGO.GetComponent<Button>();
-            button.targetGraphic = image;
-            button.onClick.AddListener(() =>
-            {
-                button.interactable = false;
-                text.text = "Lade ...";
-                LoadMoreIdr();
-            });
-            var colors = button.colors;
-            colors.normalColor = UITheme.AccentSoft;
-            colors.highlightedColor = UITheme.SurfaceHover;
-            colors.pressedColor = UITheme.SurfacePressed;
-            colors.selectedColor = colors.normalColor;
-            colors.fadeDuration = 0.08f;
-            button.colors = colors;
-        }
-
-        // vorschau-quadrat links in der zeile (siehe CreateLocalRow/CreateIdrRow) - lokal
-        // aus VolumeLibrary.Entry.ThumbnailPath (fetch_from_idr._save_thumbnail, mittlerer
-        // z-schnitt, zeigt die tatsaechlich schon verarbeiteten daten), beim IDR-durchklicken
-        // direkt idrs eigenes oeffentliches thumbnail (noch nicht heruntergeladen)
-        private const float ThumbnailSize = 48f;
-        private const float ThumbnailMargin = 8f;
-        private const float DefaultLabelOffset = 16f;
-        private const float ThumbnailLabelOffset = ThumbnailMargin * 2f + ThumbnailSize;
-
-        private RawImage CreateThumbnail(Transform parent)
-        {
-            var go = new GameObject("Thumbnail", typeof(RawImage));
-            go.transform.SetParent(parent, false);
-            var rect = go.GetComponent<RectTransform>();
-            rect.anchorMin = new Vector2(0f, 0.5f);
-            rect.anchorMax = new Vector2(0f, 0.5f);
-            rect.pivot = new Vector2(0f, 0.5f);
-            rect.anchoredPosition = new Vector2(ThumbnailMargin, 0f);
-            rect.sizeDelta = new Vector2(ThumbnailSize, ThumbnailSize);
-
-            var rawImage = go.GetComponent<RawImage>();
-            rawImage.color = UITheme.Surface; // platzhalter bis das echte bild geladen ist
-            rawImage.raycastTarget = false;
-            return rawImage;
-        }
-
         // laedt asynchron, schlaegt einfach lautlos fehl (platzhalter bleibt stehen) -
         // eine kaputte vorschau darf das laden des eigentlichen volumens nicht verhindern
-        private IEnumerator LoadThumbnailCoroutine(RawImage target, string url)
+        private IEnumerator LoadThumbnail(RawImage target, string url)
         {
             using var request = UnityWebRequestTexture.GetTexture(url);
             yield return request.SendWebRequest();
@@ -407,30 +289,10 @@ namespace BioimageVR
             target.color = Color.white;
         }
 
-        private void CreateLabel(string message)
+        private void Message(string text)
         {
-            CreateLabel(message, listContainer);
-        }
-
-        private Text CreateLabel(string message, Transform parent) => CreateLabel(message, parent, DefaultLabelOffset);
-
-        private Text CreateLabel(string message, Transform parent, float leftOffset)
-        {
-            var go = new GameObject("Text", typeof(Text));
-            go.transform.SetParent(parent, false);
-            var rect = go.GetComponent<RectTransform>();
-            rect.anchorMin = Vector2.zero;
-            rect.anchorMax = Vector2.one;
-            rect.offsetMin = new Vector2(leftOffset, 0f);
-            rect.offsetMax = new Vector2(-16f, 0f);
-
-            var text = go.GetComponent<Text>();
-            text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            text.fontSize = 22;
-            text.color = UITheme.TextPrimary;
-            text.alignment = TextAnchor.MiddleLeft;
-            text.text = message;
-            return text;
+            TextMeshProUGUI label = UIKit.Text(listContainer, text, UIKit.LabelSize, color: UITheme.TextSecondary, name: "Message");
+            UIKit.Size(label, -1, 60f);
         }
     }
 }

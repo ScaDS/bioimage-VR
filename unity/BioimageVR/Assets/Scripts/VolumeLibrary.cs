@@ -17,9 +17,15 @@ namespace BioimageVR
             public string DisplayName;
             // leer wenn keine vorschau daneben liegt (siehe fetch_from_idr.thumbnail_path_for)
             public string ThumbnailPath;
+            // eine <name>_labels.nii.gz liegt daneben
+            public bool HasLabels;
         }
 
         [Serializable] private class Metadata { public string name; public int image_id; }
+
+        private static readonly System.Text.RegularExpressions.Regex LabelsFilePattern =
+            new System.Text.RegularExpressions.Regex(@"_labels(_v\d+)?\.nii\.gz$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         public static List<Entry> Discover()
         {
@@ -35,14 +41,16 @@ namespace BioimageVR
 #endif
 
             // masken gehoeren zu einem bild, keine eigenen galerie eintraege
+            // auch versionen aus der napari bruecke, <name>_labels_v002.nii.gz
             var entries = paths
-                .Where(p => !p.EndsWith("_labels.nii.gz", StringComparison.OrdinalIgnoreCase))
+                .Where(p => !LabelsFilePattern.IsMatch(p))
                 .OrderBy(p => p)
                 .Select(p => new Entry
                 {
                     Path = p,
                     DisplayName = ResolveDisplayName(p),
-                    ThumbnailPath = ResolveThumbnailPath(p)
+                    ThumbnailPath = ResolveThumbnailPath(p),
+                    HasLabels = HasLabels(p)
                 })
                 .ToList();
             return entries;
@@ -59,8 +67,13 @@ namespace BioimageVR
         }
 
         // sucht ein metadata.json daneben (siehe fetch_from_idr.py), sonst nur dateiname
+        // varianten im selben ordner (_original, _denoised) teilen sich das metadata.json,
+        // suffix deshalb mit anhaengen, sonst heissen alle gleich
         private static string ResolveDisplayName(string volumePath)
         {
+            string stem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(volumePath));
+            string name = stem;
+
             string metadataPath = Path.Combine(Path.GetDirectoryName(volumePath) ?? "", "metadata.json");
             if (File.Exists(metadataPath))
             {
@@ -68,7 +81,12 @@ namespace BioimageVR
                 {
                     var metadata = JsonUtility.FromJson<Metadata>(File.ReadAllText(metadataPath));
                     if (!string.IsNullOrEmpty(metadata?.name))
-                        return $"{metadata.name} ({metadata.image_id})";
+                    {
+                        // bilder aus napari haben keine idr id
+                        name = metadata.image_id > 0 ? $"{metadata.name} ({metadata.image_id})" : metadata.name;
+                        string prefix = $"idr_{metadata.image_id}_";
+                        if (stem.StartsWith(prefix)) name += $" {stem.Substring(prefix.Length)}";
+                    }
                 }
                 catch (Exception e)
                 {
@@ -76,7 +94,14 @@ namespace BioimageVR
                 }
             }
 
-            return Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(volumePath));
+            return name;
+        }
+
+        // gleiche namensregel wie VolumeView.TryParseLabels
+        private static bool HasLabels(string volumePath)
+        {
+            string stem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(volumePath));
+            return File.Exists(Path.Combine(Path.GetDirectoryName(volumePath) ?? "", $"{stem}_labels.nii.gz"));
         }
     }
 }

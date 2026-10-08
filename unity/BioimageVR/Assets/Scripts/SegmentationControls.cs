@@ -1,58 +1,73 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // segmentierung an aus, zeile in den einstellungen
+    // abschnitt segmentation im display tab, labels an aus plus farbstaerke
     // nur sichtbar wenn zum aktuellen bild eine _labels datei geladen wurde
+    // anzeige kommt vom SidePanelController
     public class SegmentationControls : MonoBehaviour
     {
         [SerializeField] private VolumeView volumeView;
-        [SerializeField] private Button toggleButton;
-        [SerializeField] private Text toggleLabel;
-        [SerializeField] private GameObject row;
 
-        private void Awake()
+        private GameObject section;
+        private UISwitch showSwitch;
+        private TMP_Text countLabel;
+        private Slider strengthSlider;
+        private GameObject strengthRow;
+
+        public void Bind(GameObject sectionRoot, UISwitch toggle, TMP_Text count, Slider strength, GameObject strengthRowRoot)
         {
-            if (toggleButton != null) toggleButton.onClick.AddListener(Toggle);
+            section = sectionRoot;
+            showSwitch = toggle;
+            countLabel = count;
+            strengthSlider = strength;
+            strengthRow = strengthRowRoot;
+            showSwitch.ValueChanged += on => volumeView.ShowLabels = on;
+            strengthSlider.onValueChanged.AddListener(value =>
+            {
+                if (volumeView.HasLabels) volumeView.LabelStrength = value;
+            });
+            Refresh();
         }
 
         private void OnEnable()
         {
-            if (volumeView != null) volumeView.OnVolumeLoaded += HandleVolumeLoaded;
+            if (volumeView == null) return;
+            volumeView.OnVolumeLoaded += HandleVolumeLoaded;
+            volumeView.LabelsChanged += Refresh;
+            volumeView.LabelsDisplayChanged += Refresh;
             Refresh();
         }
 
         private void OnDisable()
         {
-            if (volumeView != null) volumeView.OnVolumeLoaded -= HandleVolumeLoaded;
+            if (volumeView == null) return;
+            volumeView.OnVolumeLoaded -= HandleVolumeLoaded;
+            volumeView.LabelsChanged -= Refresh;
+            volumeView.LabelsDisplayChanged -= Refresh;
         }
 
         private void HandleVolumeLoaded(NiftiVolumeLoader.Volume volume) => Refresh();
 
-        private void Toggle()
-        {
-            if (volumeView == null) return;
-            volumeView.ShowLabels = !volumeView.ShowLabels;
-            Refresh();
-        }
-
-        // fuer aufrufer ausserhalb der ui, z.b. spaeter VLMToolDispatcher
+        // fuer aufrufer ausserhalb der ui
         public void SetVisibleExternal(bool on)
         {
-            if (volumeView == null) return;
-            volumeView.ShowLabels = on;
-            Refresh();
+            if (volumeView != null) volumeView.ShowLabels = on;
         }
 
         private void Refresh()
         {
-            bool hasLabels = volumeView != null && volumeView.HasLabels;
-            if (row != null) row.SetActive(hasLabels);
-            if (!hasLabels || toggleLabel == null) return;
+            if (section == null || volumeView == null) return;
+            bool hasLabels = volumeView.HasLabels;
+            if (section.activeSelf != hasLabels) section.SetActive(hasLabels);
+            if (!hasLabels) return;
 
-            int cells = volumeView.LoadedVolume.LabelCount;
-            toggleLabel.text = volumeView.ShowLabels ? $"An ({cells} Zellen)" : "Aus";
+            showSwitch.SetWithoutNotify(volumeView.ShowLabels);
+            if (strengthRow != null) strengthRow.SetActive(volumeView.ShowLabels);
+            strengthSlider.SetValueWithoutNotify(volumeView.LabelStrength);
+            countLabel.text = $"{volumeView.LoadedVolume.LabelCount} cells";
         }
     }
 }

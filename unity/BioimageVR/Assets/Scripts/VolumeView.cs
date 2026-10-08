@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -19,19 +20,234 @@ namespace BioimageVR
         // false wenn kein metadata.json, dann ist VoxelSize nur pixdim ohne echte einheit
         public bool HasPhysicalVoxelSize { get; private set; }
 
+        // einheit von VoxelSize und damit aller messwerte, µm fuer mikroskopie, mm z.b. fuer mrt
+        // "px" wenn die datei keine voxelgroesse mitbringt
+        public string Unit => HasPhysicalVoxelSize ? unit : "px";
+        private string unit = "µm";
+
         // true wenn eine <name>_labels.nii.gz mitgeladen wurde
         public bool HasLabels => LoadedVolume?.Labels != null;
+
+        // namen je id aus <name>_labels_names.json, z.b. organe von segment_anatomy.py
+        // ohne die datei sind es zellen und heissen nach ihrer nummer
+        public bool HasLabelNames => labelNames != null && labelNames.Count > 0;
+        private Dictionary<int, string> labelNames;
+
+        public string LabelName(int id) =>
+            labelNames != null && labelNames.TryGetValue(id, out string name) ? Capitalize(name) : $"Cell {id}";
+
+        private static string Capitalize(string s) => string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s.Substring(1);
+
+        // label an einer stelle im objekt raum, 0 fuer hintergrund oder ausserhalb
+        public int LabelAtLocal(Vector3 local)
+        {
+            NiftiVolumeLoader.Volume vol = LoadedVolume;
+            if (vol?.Labels == null) return 0;
+            Vector3 uvw = local + Vector3.one * 0.5f;
+            if (uvw.x < 0f || uvw.y < 0f || uvw.z < 0f || uvw.x >= 1f || uvw.y >= 1f || uvw.z >= 1f) return 0;
+            int x = (int)(uvw.x * vol.SizeX), y = (int)(uvw.y * vol.SizeY), z = (int)(uvw.z * vol.SizeZ);
+            return vol.Labels[x + vol.SizeX * (y + vol.SizeY * z)];
+        }
 
         // overlay an aus, nur wirksam wenn labels da sind
         public bool ShowLabels
         {
             get => HasLabels && GetComponent<MeshRenderer>().material.GetFloat(ShowLabelsId) > 0.5f;
-            set => GetComponent<MeshRenderer>().material.SetFloat(ShowLabelsId, value && HasLabels ? 1f : 0f);
+            set
+            {
+                GetComponent<MeshRenderer>().material.SetFloat(ShowLabelsId, value && HasLabels ? 1f : 0f);
+                LabelsDisplayChanged?.Invoke();
+            }
         }
 
-        // hebt eine zelle hervor, 0 fuer keine
-        public void SetSelectedLabel(int label) =>
-            GetComponent<MeshRenderer>().material.SetFloat(SelectedLabelId, label);
+        // wie stark die zellfarben ueber das rohbild gemischt werden, 0 bis 1
+        public float LabelStrength
+        {
+            get => GetComponent<MeshRenderer>().material.GetFloat(LabelStrengthId);
+            set => GetComponent<MeshRenderer>().material.SetFloat(LabelStrengthId, Mathf.Clamp01(value));
+        }
+
+        // ausgewaehlte zelle, 0 fuer keine, bleibt stehen bis neu gewaehlt wird
+        public int SelectedLabel
+        {
+            get => selectedLabel;
+            set
+            {
+                if (value == selectedLabel) return;
+                selectedLabel = value;
+                GetComponent<MeshRenderer>().material.SetFloat(SelectedLabelId, value);
+                SelectionChanged?.Invoke(value);
+            }
+        }
+
+        // zelle unter dem zeiger, leuchtet nur solange drauf gezeigt wird
+        public int HoverLabel
+        {
+            get => hoverLabel;
+            set
+            {
+                if (value == hoverLabel) return;
+                hoverLabel = value;
+                GetComponent<MeshRenderer>().material.SetFloat(HoverLabelId, value);
+            }
+        }
+
+        public event Action<int> SelectionChanged;
+        // segmentierung ein oder ausgeblendet, egal von wo aus
+        public event Action LabelsDisplayChanged;
+        // labels wurden bearbeitet, siehe LabelEditor
+        public event Action LabelsChanged;
+
+        public void NotifyLabelsChanged() => LabelsChanged?.Invoke();
+
+        // form analyse fertig oder nach einer korrektur aktualisiert
+        public event Action SplitHintsChanged;
+
+        public SplitHint GetSplitHint(int id)
+        {
+            SplitHint[] hints = LoadedVolume?.SplitHints;
+            return hints != null && id > 0 && id < hints.Length ? hints[id] : default;
+        }
+
+        // nach einer korrektur nur die betroffenen zellen neu pruefen, dauert pro zelle ms
+        public void RefreshSplitHints(params int[] ids)
+        {
+            NiftiVolumeLoader.Volume vol = LoadedVolume;
+            if (vol?.SplitHints == null || vol.Cells == null) return;
+            if (vol.SplitHints.Length < vol.Cells.Length)
+            {
+                SplitHint[] grown = vol.SplitHints;
+                Array.Resize(ref grown, vol.Cells.Length);
+                vol.SplitHints = grown;
+            }
+            foreach (int id in ids)
+                if (id > 0 && id < vol.Cells.Length) vol.SplitHints[id] = CellShapeAnalysis.Analyze(vol, vol.Cells[id]);
+            SplitHintsChanged?.Invoke();
+        }
+
+        // alle zellen im hintergrund, das bild ist dann schon sichtbar
+        private async void AnalyzeShapes(NiftiVolumeLoader.Volume volume)
+        {
+            SplitHint[] hints;
+            try
+            {
+                hints = await Task.Run(() => CellShapeAnalysis.AnalyzeAll(volume));
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"VolumeView: formanalyse fehlgeschlagen: {e.Message}");
+                return;
+            }
+            // inzwischen anderes bild geladen
+            if (volume != LoadedVolume) return;
+            volume.SplitHints = hints;
+            SplitHintsChanged?.Invoke();
+        }
+
+        // nach einem kompletten neubau der label textur, siehe LabelEditor.RebuildTexture
+        public void RebindLabelTexture()
+        {
+            if (LoadedVolume?.LabelTexture != null)
+                GetComponent<MeshRenderer>().material.SetTexture(LabelTexId, LoadedVolume.LabelTexture);
+        }
+
+        // tatsaechlicher pfad auf dem geraet, auf android in persistentDataPath
+        public string ResolvedVolumePath { get; private set; }
+        // eine zelle wurde aus oder eingeblendet
+        public event Action CellVisibilityChanged;
+
+        private int selectedLabel;
+        private int hoverLabel;
+        // 256 mal 256 reicht fuer alle uint16 ids, texel id%256 und id/256
+        private Texture2D visibilityTexture;
+        private byte[] visibility;
+        private const int VisibilitySize = 256;
+
+        public bool IsCellVisible(int id) =>
+            visibility == null || id <= 0 || id >= visibility.Length || visibility[id] > 0;
+
+        public void SetCellVisible(int id, bool visible)
+        {
+            if (visibility == null || id <= 0 || id >= visibility.Length) return;
+            visibility[id] = visible ? (byte)255 : (byte)0;
+            if (!visible && selectedLabel == id) SelectedLabel = 0;
+            UploadVisibility();
+        }
+
+        public void ShowAllCells()
+        {
+            if (visibility == null) return;
+            for (int i = 0; i < visibility.Length; i++) visibility[i] = 255;
+            UploadVisibility();
+        }
+
+        private void UploadVisibility()
+        {
+            visibilityTexture.SetPixelData(visibility, 0);
+            visibilityTexture.Apply(false);
+            CellVisibilityChanged?.Invoke();
+        }
+
+        // erster sichtbarer voxel mit label ungleich 0 entlang des strahls
+        // unabhaengig vom threshold, ausgeblendete zellen werden durchschaut
+        public bool TryPickCell(Ray worldRay, out int id, out Vector3 hitLocal)
+        {
+            id = 0;
+            hitLocal = default;
+            NiftiVolumeLoader.Volume vol = LoadedVolume;
+            if (vol?.Labels == null) return false;
+
+            Vector3 o = transform.InverseTransformPoint(worldRay.origin);
+            Vector3 d = transform.InverseTransformDirection(worldRay.direction).normalized;
+            if (!IntersectUnitBox(o, d, out float tNear, out float tFar)) return false;
+            tNear = Mathf.Max(tNear, 0f);
+
+            // halber voxel schritt, reicht um keinen voxel zu ueberspringen
+            float step = 0.5f / Mathf.Max(vol.SizeX, Mathf.Max(vol.SizeY, vol.SizeZ));
+            for (float t = tNear; t <= tFar; t += step)
+            {
+                Vector3 p = o + d * t;
+                Vector3 uvw = p + Vector3.one * 0.5f;
+                int x = Mathf.Clamp((int)(uvw.x * vol.SizeX), 0, vol.SizeX - 1);
+                int y = Mathf.Clamp((int)(uvw.y * vol.SizeY), 0, vol.SizeY - 1);
+                int z = Mathf.Clamp((int)(uvw.z * vol.SizeZ), 0, vol.SizeZ - 1);
+                int label = vol.Labels[x + vol.SizeX * (y + vol.SizeY * z)];
+                if (label > 0 && IsCellVisible(label))
+                {
+                    id = label;
+                    hitLocal = p;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // gleiche box wie IntersectBox im shader
+        public static bool IntersectUnitBox(Vector3 o, Vector3 d, out float tNear, out float tFar)
+        {
+            tNear = float.NegativeInfinity;
+            tFar = float.PositiveInfinity;
+            for (int axis = 0; axis < 3; axis++)
+            {
+                if (Mathf.Abs(d[axis]) < 1e-8f)
+                {
+                    if (o[axis] < -0.5f || o[axis] > 0.5f) return false;
+                    continue;
+                }
+                float t0 = (-0.5f - o[axis]) / d[axis];
+                float t1 = (0.5f - o[axis]) / d[axis];
+                tNear = Mathf.Max(tNear, Mathf.Min(t0, t1));
+                tFar = Mathf.Min(tFar, Mathf.Max(t0, t1));
+            }
+            return tFar > Mathf.Max(tNear, 0f);
+        }
+
+        // voxel koordinate auf objekt raum, gleich wie im shader
+        public Vector3 VoxelToLocal(Vector3 voxel)
+        {
+            NiftiVolumeLoader.Volume vol = LoadedVolume;
+            return new Vector3(voxel.x / vol.SizeX - 0.5f, voxel.y / vol.SizeY - 0.5f, voxel.z / vol.SizeZ - 0.5f);
+        }
 
         // feuert nach jedem erfolgreichen laden, auch beim nachladen
         public event Action<NiftiVolumeLoader.Volume> OnVolumeLoaded;
@@ -44,6 +260,8 @@ namespace BioimageVR
         private static readonly int Channel2OnId = Shader.PropertyToID("_Channel2On");
         private static readonly int VolumeTexelSizeId = Shader.PropertyToID("_VolumeTexelSize");
         private static readonly int VolumeSizeId = Shader.PropertyToID("_VolumeSize");
+        private static readonly int BrickTexId = Shader.PropertyToID("_BrickTex");
+        private static readonly int BrickCountId = Shader.PropertyToID("_BrickCount");
         private static readonly int DensityId = Shader.PropertyToID("_Density");
         private static readonly int ThresholdId = Shader.PropertyToID("_Threshold");
         private static readonly int ThresholdMaxId = Shader.PropertyToID("_ThresholdMax");
@@ -53,6 +271,11 @@ namespace BioimageVR
         private static readonly int HasLabelsId = Shader.PropertyToID("_HasLabels");
         private static readonly int ShowLabelsId = Shader.PropertyToID("_ShowLabels");
         private static readonly int SelectedLabelId = Shader.PropertyToID("_SelectedLabel");
+        private static readonly int LabelStrengthId = Shader.PropertyToID("_LabelStrength");
+        private static readonly int HoverLabelId = Shader.PropertyToID("_HoverLabel");
+        private static readonly int LabelVisTexId = Shader.PropertyToID("_LabelVisTex");
+        private static readonly int LampPosId = Shader.PropertyToID("_LampPosWS");
+        private static readonly int LampRangeId = Shader.PropertyToID("_LampRange");
 
         // shader-defaults aus VolumeRaymarch.shader, gleiche werte hier fest verdrahtet -
         // jedes volumen bekommt seinen eigenen kontrast/threshold schon beim konvertieren
@@ -79,7 +302,36 @@ namespace BioimageVR
 
         private void Start()
         {
+            // haelt die bildrate ueber die schrittweite statt ueber die aufloesung
+            if (GetComponent<VolumeStepGovernor>() == null) gameObject.AddComponent<VolumeStepGovernor>();
+            // der wuerfel bringt einen collider mit den nichts braucht, der controller strahl
+            // endet sonst an der wuerfelwand statt am panel dahinter
+            Collider box = GetComponent<Collider>();
+            if (box != null) Destroy(box);
             if (!string.IsNullOrEmpty(VolumeFilePath)) LoadVolume(VolumeFilePath);
+        }
+
+        // kopflampe fuer den surface modus, sitzt mittig zwischen den augen
+        // reichweite in metern im raum, dadurch passt der abfall bei jeder vergroesserung
+        // drinnen kurz, gaenge werden nach hinten dunkel, von aussen reicht sie bis ans volumen
+        [SerializeField] private float lampRangeInside = 0.6f;
+        private MeshRenderer lampRenderer;
+
+        private void LateUpdate()
+        {
+            Camera cam = Camera.main;
+            if (cam == null || LoadedVolume == null) return;
+            if (lampRenderer == null) lampRenderer = GetComponent<MeshRenderer>();
+
+            Vector3 head = cam.transform.position;
+            Vector3 local = transform.InverseTransformPoint(head);
+            Vector3 nearest = new Vector3(
+                Mathf.Clamp(local.x, -0.5f, 0.5f), Mathf.Clamp(local.y, -0.5f, 0.5f), Mathf.Clamp(local.z, -0.5f, 0.5f));
+            float outside = Vector3.Distance(transform.TransformPoint(nearest), head);
+
+            Material mat = lampRenderer.material;
+            mat.SetVector(LampPosId, head);
+            mat.SetFloat(LampRangeId, lampRangeInside + 1.5f * outside);
         }
 
         // zaehlt hoch bei jedem LoadVolume aufruf, eine spaeter ueberholte antwort
@@ -102,12 +354,18 @@ namespace BioimageVR
             // hauptthread (und damit frame/xr compositor) dabei nicht einfriert
             NiftiVolumeLoader.RawVolumeData data;
             NiftiVolumeLoader.RawLabelData labelData = null;
+            CellInfo[] cells = null;
+            NiftiVolumeLoader.BrickMap bricks = null;
+            Dictionary<int, string> names = null;
             try
             {
                 data = await Task.Run(() =>
                 {
                     var parsed = NiftiVolumeLoader.ParseFile(resolvedPath);
+                    bricks = NiftiVolumeLoader.ComputeBricks(parsed);
                     labelData = TryParseLabels(resolvedPath, parsed);
+                    if (labelData != null) names = TryReadLabelNames(resolvedPath);
+                    if (labelData != null) cells = CellStats.Compute(labelData, parsed.Voxels, parsed.IsColor);
                     return parsed;
                 });
             }
@@ -123,30 +381,38 @@ namespace BioimageVR
 
             // texture3d bauen muss auf dem hauptthread laufen (unity api)
             NiftiVolumeLoader.Volume volume = NiftiVolumeLoader.BuildTexture(data);
+            volume.BrickTexture = NiftiVolumeLoader.BuildBrickTexture(bricks);
             if (labelData != null)
             {
                 volume.Labels = labelData.Labels;
                 volume.LabelTexture = NiftiVolumeLoader.BuildLabelTexture(labelData);
                 volume.MaxLabel = labelData.MaxLabel;
                 volume.LabelCount = labelData.LabelCount;
+                volume.Cells = cells;
             }
 
             // nifti pixdim ist aktuell immer 1,1,1 (siehe convert_to_volume.py, identitaets
             // affine) - die echte, von idr gemessene voxelgroesse liegt stattdessen im
             // metadata.json neben der datei. ohne das waere jeder wuerfel faelschlich
             // isotrop, und massstab/messtool haetten keine echte grundlage
-            Vector3? voxelSizeUm = TryReadVoxelSizeFromMetadata(resolvedPath);
-            if (voxelSizeUm.HasValue) volume.VoxelSize = voxelSizeUm.Value;
-            HasPhysicalVoxelSize = voxelSizeUm.HasValue;
+            Vector3? voxelSize = TryReadVoxelSizeFromMetadata(resolvedPath, out string voxelUnit);
+            if (voxelSize.HasValue) volume.VoxelSize = voxelSize.Value;
+            HasPhysicalVoxelSize = voxelSize.HasValue;
+            unit = voxelUnit;
 
             if (LoadedVolume != null)
             {
                 Destroy(LoadedVolume.Texture);
                 if (LoadedVolume.LabelTexture != null) Destroy(LoadedVolume.LabelTexture);
+                if (LoadedVolume.BrickTexture != null) Destroy(LoadedVolume.BrickTexture);
             }
 
             MeshRenderer meshRenderer = GetComponent<MeshRenderer>();
             meshRenderer.material.SetTexture(VolumeTexId, volume.Texture);
+            // leere bloecke ueberspringt der shader, kostet beim laden einen bruchteil einer sekunde
+            meshRenderer.material.SetTexture(BrickTexId, volume.BrickTexture);
+            meshRenderer.material.SetVector(BrickCountId, new Vector4(
+                volume.BrickTexture.width, volume.BrickTexture.height, volume.BrickTexture.depth, NiftiVolumeLoader.BrickSize));
             meshRenderer.material.SetFloat(IsColorId, volume.IsColor ? 1f : 0f);
             meshRenderer.material.SetFloat(IsLiveChannelsId, volume.IsLiveChannels ? 1f : 0f);
             // frisch geladenes volumen startet mit allen kanaelen an, sonst bleibt ein
@@ -168,6 +434,10 @@ namespace BioimageVR
             meshRenderer.material.SetFloat(HasLabelsId, hasLabels ? 1f : 0f);
             meshRenderer.material.SetFloat(ShowLabelsId, hasLabels ? 1f : 0f);
             meshRenderer.material.SetFloat(SelectedLabelId, 0f);
+            meshRenderer.material.SetFloat(HoverLabelId, 0f);
+            selectedLabel = 0;
+            hoverLabel = 0;
+            if (hasLabels) ResetVisibility(meshRenderer.material);
             meshRenderer.material.SetVector(VolumeTexelSizeId,
                 new Vector4(1.5f / volume.SizeX, 1.5f / volume.SizeY, 1.5f / volume.SizeZ, 0f));
             // fuer SampleVoxelCubic (tricubic filterung), echte texelanzahl statt
@@ -184,8 +454,31 @@ namespace BioimageVR
             transform.localScale = physicalSize / maxDimension;
 
             VolumeFilePath = rawPath;
+            ResolvedVolumePath = resolvedPath;
             LoadedVolume = volume;
+            labelNames = names;
             OnVolumeLoaded?.Invoke(volume);
+            // "evtl. 2 zellen" ergibt bei organen keinen sinn
+            if (volume.Cells != null && !HasLabelNames) AnalyzeShapes(volume);
+            SelectionChanged?.Invoke(0);
+        }
+
+        // neues bild, alle zellen wieder sichtbar
+        private void ResetVisibility(Material material)
+        {
+            if (visibilityTexture == null)
+            {
+                visibilityTexture = new Texture2D(VisibilitySize, VisibilitySize, TextureFormat.R8, false)
+                {
+                    filterMode = FilterMode.Point,
+                    wrapMode = TextureWrapMode.Clamp
+                };
+                visibility = new byte[VisibilitySize * VisibilitySize];
+            }
+            for (int i = 0; i < visibility.Length; i++) visibility[i] = 255;
+            visibilityTexture.SetPixelData(visibility, 0);
+            visibilityTexture.Apply(false);
+            material.SetTexture(LabelVisTexId, visibilityTexture);
         }
 
         // <name>_labels.nii.gz im selben ordner, siehe preprocessing/convert_labels.py
@@ -215,14 +508,49 @@ namespace BioimageVR
             }
         }
 
-        [Serializable] private class VoxelSizeMetadata { public VoxelSizeUm voxel_size_um; }
-        [Serializable] private class VoxelSizeUm { public float x, y, z; }
+        [Serializable] private class LabelNamesFile { public string kind; public LabelNameEntry[] labels; }
+        [Serializable] private class LabelNameEntry { public int id; public string name; }
+
+        // <name>_labels_names.json neben der maske, fehlt bei zell segmentierungen
+        private static Dictionary<int, string> TryReadLabelNames(string volumePath)
+        {
+            string dir = Path.GetDirectoryName(volumePath) ?? "";
+            string stem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(volumePath));
+            string path = Path.Combine(dir, $"{stem}_labels_names.json");
+            if (!File.Exists(path)) return null;
+            try
+            {
+                var parsed = JsonUtility.FromJson<LabelNamesFile>(File.ReadAllText(path));
+                if (parsed?.labels == null) return null;
+                var names = new Dictionary<int, string>();
+                foreach (LabelNameEntry entry in parsed.labels)
+                    if (entry.id > 0 && !string.IsNullOrEmpty(entry.name)) names[entry.id] = entry.name;
+                return names;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"VolumeView: namen '{path}' nicht lesbar: {e.Message}");
+                return null;
+            }
+        }
+
+        // neu: voxel_size plus unit, alt und von idr: nur voxel_size_um
+        [Serializable] private class VoxelSizeMetadata
+        {
+            public Vec voxel_size;
+            public string unit;
+            public Vec voxel_size_um;
+        }
+        [Serializable] private class Vec { public float x, y, z; }
+
+        private static bool Valid(Vec v) => v != null && v.x > 0 && v.y > 0 && v.z > 0;
 
         // <name>_metadata.json zuerst (android, flach im persistentDataPath gepusht),
         // sonst metadata.json im selben ordner (editor/standalone, ein ordner pro bild) -
         // gleiches schema wie VolumeMetadataPanel.Refresh
-        private static Vector3? TryReadVoxelSizeFromMetadata(string volumePath)
+        private static Vector3? TryReadVoxelSizeFromMetadata(string volumePath, out string unit)
         {
+            unit = "µm";
             string dir = Path.GetDirectoryName(volumePath) ?? "";
             string stem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(volumePath));
             string namedPath = Path.Combine(dir, $"{stem}_metadata.json");
@@ -233,10 +561,15 @@ namespace BioimageVR
             try
             {
                 var parsed = JsonUtility.FromJson<VoxelSizeMetadata>(File.ReadAllText(path));
-                if (parsed?.voxel_size_um == null) return null;
-                var v = parsed.voxel_size_um;
-                if (v.x <= 0 || v.y <= 0 || v.z <= 0) return null;
-                return new Vector3(v.x, v.y, v.z);
+                if (parsed == null) return null;
+                // jsonutility legt fehlende objekte mit nullen an statt null, deshalb Valid
+                if (Valid(parsed.voxel_size) && !string.IsNullOrEmpty(parsed.unit))
+                {
+                    unit = parsed.unit == "um" ? "µm" : parsed.unit;
+                    return new Vector3(parsed.voxel_size.x, parsed.voxel_size.y, parsed.voxel_size.z);
+                }
+                if (!Valid(parsed.voxel_size_um)) return null;
+                return new Vector3(parsed.voxel_size_um.x, parsed.voxel_size_um.y, parsed.voxel_size_um.z);
             }
             catch (Exception e)
             {

@@ -62,10 +62,28 @@ def match_volume_layout(mask_zyx: np.ndarray, volume_shape: tuple[int, ...]) -> 
     )
 
 
-def convert_labels(mask_path: Path, volume_path: Path) -> Path:
-    mask = load_mask(mask_path)
+def resize_labels_nearest(mask: np.ndarray, target_shape: tuple[int, ...]) -> np.ndarray:
+    """labels auf eine andere groesse bringen, nearest neighbor ueber indizes statt
+    interpolation, ids bleiben exakt. fuer verkleinerte volumen und den weg zurueck"""
+    if mask.shape == tuple(target_shape):
+        return mask
+    indices = [
+        np.minimum((np.arange(n) * (old / n)).astype(np.int64), old - 1)
+        for old, n in zip(mask.shape, target_shape)
+    ]
+    return mask[np.ix_(*indices)]
+
+
+def write_labels_array(mask_zyx: np.ndarray, volume_path: Path) -> Path:
+    """schon geladene maske (z,y,x) neben das volumen schreiben, gleiche regeln wie
+    convert_labels, z.b. fuer labels layer aus napari"""
+    if not np.issubdtype(mask_zyx.dtype, np.integer):
+        raise ValueError(f"Label mask must be integer typed, got {mask_zyx.dtype}")
+    if mask_zyx.min() < 0 or mask_zyx.max() > 65535:
+        raise ValueError(f"Label ids must fit into uint16, got range {mask_zyx.min()}..{mask_zyx.max()}")
+
     volume = nib.load(str(volume_path))
-    labels = match_volume_layout(mask, volume.shape).astype(np.uint16)
+    labels = match_volume_layout(mask_zyx, volume.shape).astype(np.uint16)
 
     image = nib.Nifti1Image(np.ascontiguousarray(labels), affine=np.eye(4))
     image.set_data_dtype(np.uint16)
@@ -75,6 +93,16 @@ def convert_labels(mask_path: Path, volume_path: Path) -> Path:
     count = len(np.unique(labels)) - 1
     print(f"Wrote {output_path} - shape={labels.shape} labels={count} max_id={labels.max()}")
     return output_path
+
+
+def read_labels_zyx(labels_path: Path) -> np.ndarray:
+    """labels nifti zurueck nach (z,y,x), gegenstueck zu write_labels_array im neuen layout"""
+    data = np.asanyarray(nib.load(str(labels_path)).dataobj)
+    return np.ascontiguousarray(data.transpose(2, 1, 0))
+
+
+def convert_labels(mask_path: Path, volume_path: Path) -> Path:
+    return write_labels_array(load_mask(mask_path), volume_path)
 
 
 def main() -> None:

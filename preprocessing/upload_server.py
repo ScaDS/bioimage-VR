@@ -60,8 +60,11 @@ from fetch_from_idr import (
     list_projects_page,
 )
 from rag_index import query as rag_query_index
+from vr_bridge import router as vr_bridge_router
 
 app = FastAPI()
+# napari plugin und brille, siehe vr_bridge.py
+app.include_router(vr_bridge_router)
 
 PAGE = """
 <!doctype html>
@@ -805,4 +808,13 @@ if __name__ == "__main__":
     SAMPLE_DIR.mkdir(parents=True, exist_ok=True)
     ip = _local_ip()
     print(f"Oeffne im WLAN auf Handy/Laptop: http://{ip}:8000")
+
+    # brille per kabel dran, dann klappt es auch ohne gemeinsames wlan
+    from vr_bridge import setup_usb
+
+    usb_error = setup_usb()
+    if usb_error is None:
+        print("Brille per USB verbunden, erreichbar in der App unter http://localhost:8000")
+    else:
+        print(f"Keine Brille per USB ({usb_error}), nur WLAN. Spaeter im napari-Plugin nachholen.")
     uvicorn.run(app, host="0.0.0.0", port=8000)

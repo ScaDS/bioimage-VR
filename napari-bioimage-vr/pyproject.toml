@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "napari-bioimage-vr"
+version = "0.1.0"
+description = "Bild und Segmentierung aus napari auf die VR-Brille schicken, Korrekturen zurueckholen und den Blick aus der Brille live spiegeln"
+requires-python = ">=3.10"
+dependencies = [
+    "napari>=0.5",
+    "numpy",
+    "requests",
+    "qtpy",
+    "av",
+    "opencv-python-headless",
+]
+classifiers = ["Framework :: napari"]
+
+[project.entry-points."napari.manifest"]
+napari-bioimage-vr = "napari_bioimage_vr:napari.yaml"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+napari_bioimage_vr = ["napari.yaml"]

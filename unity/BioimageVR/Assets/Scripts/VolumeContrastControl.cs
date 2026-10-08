@@ -5,26 +5,27 @@ namespace BioimageVR
 {
     // laufzeit-regler fuer den raymarch schwellwert, damit man in vr ohne editor-zugriff
     // nachjustieren kann wenn ein volumen zu blass/milchig aussieht
+    // regler kommt vom SidePanelController, display tab
     public class VolumeContrastControl : MonoBehaviour
     {
         [SerializeField] private VolumeView volumeView;
-        [SerializeField] private Slider thresholdSlider;
 
+        private Slider thresholdSlider;
         private static readonly int ThresholdId = Shader.PropertyToID("_Threshold");
         private Renderer volumeRenderer;
 
-        private void Awake()
+        public void Bind(Slider slider)
         {
-            if (thresholdSlider != null) thresholdSlider.onValueChanged.AddListener(SetThreshold);
+            thresholdSlider = slider;
+            thresholdSlider.onValueChanged.AddListener(SetThreshold);
+            SyncSliderFromMaterial();
         }
 
         private void OnEnable()
         {
-            if (volumeView == null || thresholdSlider == null) return;
+            if (volumeView == null) return;
             volumeRenderer = volumeView.GetComponent<Renderer>();
             volumeView.OnVolumeLoaded += HandleVolumeLoaded;
-            // slider startet auf dem materialwert (nicht auf slider default), sonst
-            // ueberschreibt das erste OnEnable den im shader gesetzten threshold
             SyncSliderFromMaterial();
         }
 
@@ -33,14 +34,14 @@ namespace BioimageVR
             if (volumeView != null) volumeView.OnVolumeLoaded -= HandleVolumeLoaded;
         }
 
-        // VolumeView.LoadVolume setzt den threshold bei jedem (auch erneuten) laden auf
-        // den default zurueck - slider muss mitziehen, sonst zeigt er noch die feinjustierung
-        // vom vorherigen bild
+        // VolumeView.LoadVolume setzt den threshold bei jedem laden auf den default zurueck,
+        // regler muss mitziehen, sonst zeigt er noch die feinjustierung vom vorherigen bild
         private void HandleVolumeLoaded(NiftiVolumeLoader.Volume volume) => SyncSliderFromMaterial();
 
         private void SyncSliderFromMaterial()
         {
-            if (volumeRenderer != null)
+            if (volumeRenderer == null && volumeView != null) volumeRenderer = volumeView.GetComponent<Renderer>();
+            if (volumeRenderer != null && thresholdSlider != null)
                 thresholdSlider.SetValueWithoutNotify(volumeRenderer.material.GetFloat(ThresholdId));
         }
 
@@ -50,9 +51,7 @@ namespace BioimageVR
             if (volumeRenderer != null) volumeRenderer.material.SetFloat(ThresholdId, value);
         }
 
-        // fuer aufrufer ausserhalb des sliders (z.b. VLMToolDispatcher) - setzt material
-        // UND slider-position, damit der regler sichtbar mitwandert statt nur unsichtbar
-        // im hintergrund den wert zu aendern
+        // fuer aufrufer ausserhalb des reglers, z.b. VLMToolDispatcher
         public void SetThresholdExternal(float value)
         {
             value = Mathf.Clamp01(value);

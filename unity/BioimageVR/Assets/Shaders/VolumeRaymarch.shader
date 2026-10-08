@@ -9,9 +9,13 @@ Shader "BioimageVR/VolumeRaymarch"
         _VolumeTex ("Volume Texture", 3D) = "white" {}
         _Density ("Density", Range(0.01, 5)) = 1.0
         _Threshold ("Intensity Threshold", Range(0, 1)) = 0.12
-        // 03.09.: 96 -> 160 angehoben, gegen sichtbares "schichten"/banding beim
-        // raymarchen (STATUS.md 26.08., Punkt 2 wunschliste, guenstigster hebel zuerst)
-        _StepCount ("Ray Steps", Range(16, 256)) = 160
+        // 30.09.: schrittweite waechst mit der entfernung zur kamera statt fester 64 schritte
+        // pro strahl. nah fein bis zum halben voxel, fern grob, dadurch scharfe waende beim
+        // reinfliegen und beim normalen draufschauen sogar weniger schritte als vorher
+        _StepScale ("Step Scale (fraction of distance)", Range(0.01, 0.1)) = 0.04
+        _MaxSteps ("Max Ray Steps", Range(32, 512)) = 192
+        // kleinster schritt in voxeln, VolumeStepGovernor hebt ihn bei last an
+        _MinStepVoxels ("Min Step (voxels)", Range(0.25, 4)) = 0.5
         // von VolumeView.cs gesetzt je nachdem ob das geladene volumen graustufen
         // (R8, nur .r belegt) oder echtes rgb (RGBA32) ist - kein Inspector-regler
         [HideInInspector] _IsColor ("Is Color", Float) = 0
@@ -27,7 +31,17 @@ Shader "BioimageVR/VolumeRaymarch"
         [Toggle] _Channel2On ("Channel 2 On", Float) = 1
         [Toggle] _EnableShading ("Gradient Shading", Float) = 1
         _ThresholdMax ("Cut Range Max", Range(0, 1)) = 1.0
-        [Enum(Translucent,0,MIP,1)] _RenderMode ("Render Mode", Float) = 0
+        [Enum(Translucent,0,MIP,1,Surface,2)] _RenderMode ("Render Mode", Float) = 0
+        // surface modus, erste wand ueber threshold wie beim endoskop
+        // licht sitzt am kopf und faellt mit der entfernung ab, reichweite in metern im raum
+        // beides setzt VolumeView jeden frame
+        _LampRange ("Headlamp Range (m)", Range(0.05, 20)) = 2.0
+        [HideInInspector] _LampPosWS ("Headlamp Position", Vector) = (0, 0, 0, 0)
+        // ecken und falten dunkler, gibt den gaengen form
+        _SurfaceAO ("Surface Occlusion", Range(0, 1)) = 0.5
+        // farbe kommt aus den daten, grau bleibt grau, kanaele behalten ihre farbe
+        // die toenung multipliziert nur, weiss heisst neutral
+        _SurfaceTint ("Surface Tint", Color) = (1, 1, 1, 1)
         // 22.09.: sigg/hadwiger tricubic (8 statt 64 fetches), siehe SampleVoxelCubic.
         // eigener toggle statt fest an, weil das den hauptsample teuer macht (8x) -
         // live testbar/rueckgaengig zu machen ohne shader-rebuild, falls zu teuer
@@ -37,6 +51,15 @@ Shader "BioimageVR/VolumeRaymarch"
         [HideInInspector] _HasLabels ("Has Labels", Float) = 0
         [Toggle] _ShowLabels ("Show Labels", Float) = 0
         [HideInInspector] _SelectedLabel ("Selected Label", Float) = 0
+        [HideInInspector] _HoverLabel ("Hover Label", Float) = 0
+        // 256x256 r8, 0 heisst zelle ausgeblendet, siehe VolumeView.SetCellVisible
+        [HideInInspector] _LabelVisTex ("Label Visibility", 2D) = "white" {}
+        // 30.09.: hellster wert je 8er block, von VolumeView beim laden gerechnet
+        // leere bloecke ueberspringt der strahl in einem satz, _BrickCount.x 0 heisst aus
+        [HideInInspector] _BrickTex ("Brick Max", 3D) = "white" {}
+        [HideInInspector] _BrickCount ("Brick Count", Vector) = (0, 0, 0, 8)
+        // 28.09.: 0.6 war auf der brille zu blass
+        _LabelStrength ("Label Strength", Range(0, 1)) = 0.85
     }
 
     SubShader
@@ -67,11 +90,25 @@ Shader "BioimageVR/VolumeRaymarch"
             float _HasLabels;
             float _ShowLabels;
             float _SelectedLabel;
+            float _LabelStrength;
+            float _HoverLabel;
+            TEXTURE2D(_LabelVisTex);
+            SAMPLER(sampler_LabelVisTex);
+            TEXTURE3D(_BrickTex);
+            SAMPLER(sampler_BrickTex);
+            // xyz anzahl bloecke, w voxel pro block
+            float4 _BrickCount;
             float _Density;
             float _Threshold;
             float _ThresholdMax;
             float _RenderMode;
-            int _StepCount;
+            float _LampRange;
+            float3 _LampPosWS;
+            float _SurfaceAO;
+            float3 _SurfaceTint;
+            float _StepScale;
+            float _MinStepVoxels;
+            int _MaxSteps;
             float _IsColor;
             float _IsLiveChannels;
             float3 _ChannelColor0;
@@ -165,20 +202,43 @@ Shader "BioimageVR/VolumeRaymarch"
             {
                 float h = frac(id * 0.61803398875);
                 half3 rgb = saturate(abs(frac(h + float3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0);
-                return lerp(half3(1, 1, 1), rgb, 0.65h);
+                return lerp(half3(1, 1, 1), rgb, 0.9h);
+            }
+
+            // label id an der stelle, 0 wenn overlay aus
+            float LabelAt(float3 uvw)
+            {
+                if (_ShowLabels < 0.5 || _HasLabels < 0.5) return 0;
+                return SampleLabel(uvw);
+            }
+
+            // ausgeblendete zelle, wird beim raymarch uebersprungen
+            bool LabelHidden(float id)
+            {
+                if (id < 0.5) return false;
+                float2 uv = (float2(fmod(id, 256.0), floor(id / 256.0)) + 0.5) / 256.0;
+                return SAMPLE_TEXTURE2D_LOD(_LabelVisTex, sampler_LabelVisTex, uv, 0).r < 0.5;
             }
 
             // segmentierung ueber die rohfarbe legen, gewaehlte zelle staerker, rest gedimmt
-            half3 ApplyLabel(half3 color, float3 uvw)
+            // zelle unter dem zeiger leuchtet zusaetzlich auf
+            half3 ApplyLabel(half3 color, float id)
             {
                 if (_ShowLabels < 0.5 || _HasLabels < 0.5) return color;
-                float id = SampleLabel(uvw);
                 bool anySelected = _SelectedLabel > 0.5;
                 if (id < 0.5) return anySelected ? color * 0.5h : color;
                 bool selected = abs(id - _SelectedLabel) < 0.5;
-                half tintAmount = anySelected ? (selected ? 0.85h : 0.25h) : 0.6h;
-                half3 tinted = lerp(color, LabelColor(id) * max(max(color.r, color.g), max(color.b, 0.35h)) * 1.4h, tintAmount);
-                return anySelected && !selected ? tinted * 0.5h : tinted;
+                half strength = (half)_LabelStrength;
+                half tintAmount = anySelected ? (selected ? max(strength, 0.9h) : strength * 0.4h) : strength;
+                half brightness = max(max(color.r, color.g), max(color.b, 0.5h)) * 1.3h;
+                bool hovered = _HoverLabel > 0.5 && abs(id - _HoverLabel) < 0.5;
+                if (hovered)
+                {
+                    tintAmount = max(tintAmount, 0.9h);
+                    brightness *= 1.35h;
+                }
+                half3 tinted = lerp(color, LabelColor(id) * brightness, tintAmount);
+                return anySelected && !selected && !hovered ? tinted * 0.5h : tinted;
             }
 
             // b-spline gewichte einer achse aus v (bruchteil zwischen zwei texeln),
@@ -255,6 +315,15 @@ Shader "BioimageVR/VolumeRaymarch"
                 else SampleVoxel(uvw, color, intensity);
             }
 
+            // 30.09.: tricubic nur wo die schritte feiner als ca. 1.5 voxel sind, also nah an
+            // der kamera. weiter weg sieht man den unterschied nicht, spart dort 7 von 8 fetches
+            void SampleVoxelAt(float3 uvw, float stepSize, float minStep, out half3 color, out half intensity)
+            {
+                float voxel = 1.0 / max(max(_VolumeSize.x, _VolumeSize.y), _VolumeSize.z);
+                if (_TricubicFilter > 0.5 && stepSize < 1.5 * voxel) SampleVoxelCubic(uvw, color, intensity);
+                else SampleVoxel(uvw, color, intensity);
+            }
+
             // vorwaerts-differenz gradient (3 statt 6 extra samples, zentrum ist eh schon
             // gesampelt) als pseudo-normale, "kopflampe" von der kamera aus statt echtem
             // szenen-licht - kein extra lighting setup, aber gibt der struktur sichtbar
@@ -290,11 +359,12 @@ Shader "BioimageVR/VolumeRaymarch"
             // tiefe abgetastet"-muster auf, das als sichtbare schichten/ringe um
             // strukturen erscheint (STATUS.md 26.08., Punkt 2 wunschliste, standardtrick
             // gegen raymarch-banding, keine mehrkosten an samples)
+            // 30.09.: interleaved gradient noise (jimenez) statt weissem hash rauschen, eric
+            // fand es koernig. gleichmaessiger verteilt, das muster ist fein statt fleckig,
+            // gleich billig
             float RayJitter(float2 screenPos)
             {
-                float2 p = frac(screenPos * float2(443.897, 441.423));
-                p += dot(p, p.yx + 19.19);
-                return frac((p.x + p.y) * p.x);
+                return frac(52.9829189 * frac(dot(floor(screenPos), float2(0.06711056, 0.00583715))));
             }
 
             // schnitt strahl mit einheitswuerfel, objekt raum
@@ -308,6 +378,139 @@ Shader "BioimageVR/VolumeRaymarch"
                 tNear = max(max(tmin.x, tmin.y), tmin.z);
                 tFar = min(min(tmax.x, tmax.y), tmax.z);
                 return tFar > max(tNear, 0.0);
+            }
+
+            // block um pos hat nichts ueber limit, dann liefert tExit wo der strahl ihn verlaesst
+            bool BrickEmpty(float3 pos, float3 rayOrigin, float3 rayDir, half limit, out float tExit)
+            {
+                tExit = 0;
+                if (_BrickCount.x < 0.5) return false;
+                float3 idx = min(floor(saturate(pos + 0.5) * _VolumeSize / _BrickCount.w), _BrickCount.xyz - 1.0);
+                half brickMax = SAMPLE_TEXTURE3D_LOD(_BrickTex, sampler_BrickTex, (idx + 0.5) / _BrickCount.xyz, 0).r;
+                if (brickMax > limit) return false;
+
+                float3 cellMin = idx * _BrickCount.w / _VolumeSize - 0.5;
+                float3 cellMax = min((idx + 1.0) * _BrickCount.w / _VolumeSize, 1.0) - 0.5;
+                float3 exitPlane = lerp(cellMin, cellMax, step(0.0, rayDir));
+                float3 safeDir = rayDir + (abs(rayDir) < 1e-6) * 1e-6;
+                float3 tt = (exitPlane - rayOrigin) / safeDir;
+                tExit = min(min(tt.x, tt.y), tt.z);
+                return true;
+            }
+
+            // surface modus tastet nah an der kamera immer tricubic ab, auch wenn der schalter aus ist
+            // trilinear zeigt beim reinfliegen das voxelraster als stufen und facetten auf der wand
+            half SurfaceIntensity(float3 uvw, float stepSize)
+            {
+                half3 color;
+                half intensity;
+                float voxel = 1.0 / max(max(_VolumeSize.x, _VolumeSize.y), _VolumeSize.z);
+                if (stepSize < 1.5 * voxel) SampleVoxelCubic(uvw, color, intensity);
+                else SampleVoxel(uvw, color, intensity);
+                return intensity;
+            }
+
+            // innen im gewebe oder in der luft, ausgeblendete zellen zaehlen als luft
+            bool IsTissue(float3 uvw, float stepSize, float minStep)
+            {
+                half intensity = SurfaceIntensity(uvw, stepSize);
+                return intensity > _Threshold && intensity <= _ThresholdMax && !LabelHidden(LabelAt(uvw));
+            }
+
+            // surface modus, erster uebergang luft zu gewebe entlang des strahls
+            // startet die kamera im gewebe, zaehlt erst die naechste wand nach dem austritt
+            // kante danach per halbierung auf bruchteile eines voxels genau
+            half4 SurfaceHit(float3 rayOrigin, float3 rayDir, float t, float tFar, float minStep, float maxStep, float jitter)
+            {
+                bool wasTissue = IsTissue(rayOrigin + rayDir * t + 0.5, clamp(t * _StepScale, minStep, maxStep), minStep);
+                float prevT = t;
+                bool hit = false;
+
+                [loop]
+                for (int s = 0; s < _MaxSteps && t < tFar; s++)
+                {
+                    // leerer block ist sicher luft, in einem satz drueber
+                    float tExit;
+                    if (BrickEmpty(rayOrigin + rayDir * t, rayOrigin, rayDir, (half)_Threshold, tExit))
+                    {
+                        t = max(tExit + jitter * clamp(tExit * _StepScale, minStep, maxStep), t + minStep);
+                        prevT = t;
+                        wasTissue = false;
+                        continue;
+                    }
+                    float stepSize = clamp(t * _StepScale, minStep, maxStep);
+                    prevT = t;
+                    t = min(t + stepSize, tFar);
+                    bool tissue = IsTissue(rayOrigin + rayDir * t + 0.5, stepSize, minStep);
+                    if (tissue && !wasTissue)
+                    {
+                        hit = true;
+                        break;
+                    }
+                    wasTissue = tissue;
+                }
+                if (!hit) discard;
+
+                [unroll]
+                for (int k = 0; k < 5; k++)
+                {
+                    float mid = 0.5 * (prevT + t);
+                    if (IsTissue(rayOrigin + rayDir * mid + 0.5, minStep, minStep)) t = mid;
+                    else prevT = mid;
+                }
+
+                float3 hitPos = rayOrigin + rayDir * t;
+                float3 uvw = hitPos + 0.5;
+
+                // zentrale differenzen, nah an der kamera tricubic wie die wand selbst
+                float nearStep = clamp(t * _StepScale, minStep, maxStep);
+                float3 d = _VolumeTexelSize;
+                float3 grad = float3(
+                    SurfaceIntensity(uvw + float3(d.x, 0, 0), nearStep) - SurfaceIntensity(uvw - float3(d.x, 0, 0), nearStep),
+                    SurfaceIntensity(uvw + float3(0, d.y, 0), nearStep) - SurfaceIntensity(uvw - float3(0, d.y, 0), nearStep),
+                    SurfaceIntensity(uvw + float3(0, 0, d.z), nearStep) - SurfaceIntensity(uvw - float3(0, 0, d.z), nearStep));
+                float gradLen = length(grad);
+
+                // licht im weltraum rechnen, der wuerfel ist je achse anders skaliert
+                // grad ist pro voxel, mal voxelzahl gibt den gradienten im objekt raum
+                float3 hitWS = TransformObjectToWorld(hitPos);
+                float3 viewDirWS = normalize(GetCameraPositionWS() - hitWS);
+                float3 normalWS = gradLen > 1e-5 ? TransformObjectToWorldNormal(-grad * _VolumeSize) : viewDirWS;
+
+                // lampe mittig am kopf statt pro auge, sonst sind nahe waende links und rechts
+                // verschieden hell. beidseitig falls man im gewebe steckt
+                float3 toLamp = _LampPosWS - hitWS;
+                float lampDist = max(length(toLamp), 1e-4);
+                float3 lightDirWS = toLamp / lampDist;
+                half ndotl = (half)abs(dot(normalWS, lightDirWS));
+                half ndoth = (half)abs(dot(normalWS, normalize(lightDirWS + viewDirWS)));
+                half atten = (half)(1.0 / (1.0 + (lampDist / _LampRange) * (lampDist / _LampRange)));
+
+                // liegt entlang der normale bald wieder gewebe, ist es eine ecke oder falte
+                half occlusion = 0;
+                if (_SurfaceAO > 0.001 && gradLen > 1e-5)
+                {
+                    float3 outward = -grad / gradLen / _VolumeSize;
+                    half lo = (half)_Threshold - 0.04h;
+                    half hi = (half)_Threshold + 0.04h;
+                    occlusion += 0.40h * smoothstep(lo, hi, SampleIntensity(uvw + outward * 1.5));
+                    occlusion += 0.35h * smoothstep(lo, hi, SampleIntensity(uvw + outward * 3.0));
+                    occlusion += 0.25h * smoothstep(lo, hi, SampleIntensity(uvw + outward * 5.0));
+                }
+                half ao = 1.0h - (half)_SurfaceAO * occlusion;
+
+                half3 color;
+                half intensity;
+                SampleVoxel(uvw, color, intensity);
+                // nur der farbton der daten, helligkeit macht die lampe
+                half3 hue = color / max(max(color.r, color.g), max(color.b, 0.001h));
+                half3 baseColor = (half3)_SurfaceTint * hue * lerp(0.75h, 0.95h, saturate(intensity));
+                baseColor = ApplyLabel(baseColor, LabelAt(uvw));
+
+                half diffuse = 0.1h + 0.9h * ndotl;
+                half specular = 0.3h * pow(ndoth, 32.0h);
+                half3 lit = ((baseColor * diffuse + specular) * atten + baseColor * 0.03h) * ao;
+                return half4(saturate(lit), 1);
             }
 
             half4 frag(Varyings i) : SV_Target
@@ -329,9 +532,14 @@ Shader "BioimageVR/VolumeRaymarch"
                     discard;
 
                 tNear = max(tNear, 0.0);
-                float stepSize = (tFar - tNear) / _StepCount;
+                // halber voxel der feinsten achse als untergrenze, ein 40stel des weges als obergrenze
+                float minStep = _MinStepVoxels / max(max(_VolumeSize.x, _VolumeSize.y), _VolumeSize.z);
+                float maxStep = (tFar - tNear) / 40.0;
                 float jitter = RayJitter(i.positionHCS.xy);
-                float3 pos = rayOrigin + rayDir * (tNear + jitter * stepSize);
+                float t = tNear + jitter * clamp(tNear * _StepScale, minStep, maxStep);
+
+                if (_RenderMode > 1.5)
+                    return SurfaceHit(rayOrigin, rayDir, t, tFar, minStep, maxStep, jitter);
 
                 if (_RenderMode > 0.5)
                 {
@@ -341,18 +549,28 @@ Shader "BioimageVR/VolumeRaymarch"
                     // strukturen (nur der eine hellste punkt pro strahl gewinnt)
                     half bestIntensity = 0;
                     half3 bestColor = 0;
-                    float3 bestPos = pos;
+                    float3 bestPos = rayOrigin + rayDir * t;
                     bool hit = false;
 
                     [loop]
-                    for (int s = 0; s < _StepCount; s++)
+                    for (int s = 0; s < _MaxSteps && t < tFar; s++)
                     {
+                        float3 pos = rayOrigin + rayDir * t;
+                        // block ohne etwas helleres als bisher gefunden bringt nichts
+                        float tExit;
+                        if (BrickEmpty(pos, rayOrigin, rayDir, max((half)_Threshold, bestIntensity), tExit))
+                        {
+                            t = max(tExit + jitter * clamp(tExit * _StepScale, minStep, maxStep), t + minStep);
+                            continue;
+                        }
+                        float stepSize = clamp(t * _StepScale, minStep, maxStep);
                         float3 uvw = pos + 0.5;
                         half3 color;
                         half intensity;
-                        SampleVoxelMain(uvw, color, intensity);
+                        SampleVoxelAt(uvw, stepSize, minStep, color, intensity);
 
-                        if (intensity > _Threshold && intensity <= _ThresholdMax && intensity > bestIntensity)
+                        if (intensity > _Threshold && intensity <= _ThresholdMax && intensity > bestIntensity
+                            && !LabelHidden(LabelAt(uvw)))
                         {
                             bestIntensity = intensity;
                             bestColor = color;
@@ -360,13 +578,13 @@ Shader "BioimageVR/VolumeRaymarch"
                             hit = true;
                         }
 
-                        pos += rayDir * stepSize;
+                        t += stepSize;
                     }
 
                     if (!hit) discard;
 
                     float3 bestUvw = bestPos + 0.5;
-                    bestColor = ApplyLabel(bestColor, bestUvw);
+                    bestColor = ApplyLabel(bestColor, LabelAt(bestUvw));
                     half3 finalColor = ApplyShading(bestColor, bestIntensity, bestUvw, bestPos, camOS);
                     return half4(finalColor, 1);
                 }
@@ -374,14 +592,24 @@ Shader "BioimageVR/VolumeRaymarch"
                 half4 accum = half4(0, 0, 0, 0);
 
                 [loop]
-                for (int s = 0; s < _StepCount; s++)
+                for (int s = 0; s < _MaxSteps && t < tFar; s++)
                 {
+                    float3 pos = rayOrigin + rayDir * t;
+                    float tExit;
+                    if (BrickEmpty(pos, rayOrigin, rayDir, (half)_Threshold, tExit))
+                    {
+                        t = max(tExit + jitter * clamp(tExit * _StepScale, minStep, maxStep), t + minStep);
+                        continue;
+                    }
+                    float stepSize = clamp(t * _StepScale, minStep, maxStep);
                     float3 uvw = pos + 0.5; // objekt raum auf textur raum 0 bis 1
                     half3 color;
                     half intensity;
-                    SampleVoxelMain(uvw, color, intensity);
+                    SampleVoxelAt(uvw, stepSize, minStep, color, intensity);
 
-                    if (intensity > _Threshold && intensity <= _ThresholdMax)
+                    bool inRange = intensity > _Threshold && intensity <= _ThresholdMax;
+                    float labelId = inRange ? LabelAt(uvw) : 0;
+                    if (inRange && !LabelHidden(labelId))
                     {
                         // 0 direkt ueber threshold, 1 beim maximum. smoothstep statt reinem
                         // quadrat (21.09.: vtk/slicer vergleich, siehe VOLUME_RENDERING
@@ -392,16 +620,20 @@ Shader "BioimageVR/VolumeRaymarch"
                         shaped = shaped * shaped * (3.0h - 2.0h * shaped);
                         half alpha = saturate(shaped * _Density * stepSize * 10.0);
 
-                        color = ApplyLabel(color, uvw);
-                        half3 shadedColor = ApplyShading(color, intensity, uvw, pos, camOS);
+                        // kaum sichtbarer beitrag, gradient und label lohnen nicht
+                        if (alpha > 0.004h)
+                        {
+                            color = ApplyLabel(color, labelId);
+                            half3 shadedColor = ApplyShading(color, intensity, uvw, pos, camOS);
 
-                        accum.rgb += (1.0 - accum.a) * alpha * shadedColor;
-                        accum.a += (1.0 - accum.a) * alpha;
+                            accum.rgb += (1.0 - accum.a) * alpha * shadedColor;
+                            accum.a += (1.0 - accum.a) * alpha;
+                        }
                     }
 
-                    pos += rayDir * stepSize;
+                    t += stepSize;
 
-                    if (accum.a >= 0.995) break;
+                    if (accum.a >= 0.98) break;
                 }
 
                 if (accum.a <= 0.001) discard;
