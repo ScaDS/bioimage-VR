@@ -7,12 +7,29 @@ from __future__ import annotations
 
 import io
 import math
+import re
+import threading
 from dataclasses import dataclass
 
 import numpy as np
 import requests
 
 MAX_CHANNELS = 3
+
+# eine verbindung je thread offen halten statt fuer jede anfrage eine neue
+_local = threading.local()
+
+
+def _http() -> requests.Session:
+    if not hasattr(_local, "session"):
+        _local.session = requests.Session()
+    return _local.session
+
+
+def _url(server: str) -> str:
+    """localhost durch 127.0.0.1 ersetzen. windows probiert sonst erst ipv6 und wartet 2 s
+    pro anfrage, der server hoert nur auf ipv4"""
+    return re.sub(r"//localhost(?=[:/]|$)", "//127.0.0.1", server.rstrip("/"))
 
 
 def to_czyx(array: np.ndarray, rgb: bool = False) -> np.ndarray:
@@ -59,7 +76,7 @@ def build_bundle(channels: list[np.ndarray], labels: np.ndarray | None,
 
 
 def push(server: str, bundle: bytes, name: str, denoise: bool = False) -> dict:
-    response = requests.post(f"{server}/vr/push", files={"bundle": ("bundle.npz", bundle)},
+    response = _http().post(f"{_url(server)}/vr/push", files={"bundle": ("bundle.npz", bundle)},
                              data={"name": name, "denoise": str(denoise).lower()}, timeout=600)
     result = response.json()
     if response.status_code != 200:
@@ -69,7 +86,7 @@ def push(server: str, bundle: bytes, name: str, denoise: bool = False) -> dict:
 
 def fetch_labels(server: str, name: str) -> tuple[np.ndarray, np.ndarray, int]:
     """neueste maske als (z,y,x) in originalgroesse, dazu scale und version"""
-    response = requests.get(f"{server}/vr/labels", params={"name": name}, timeout=120)
+    response = _http().get(f"{_url(server)}/vr/labels", params={"name": name}, timeout=120)
     if response.status_code != 200:
         raise RuntimeError(response.json().get("error", response.text))
     data = np.load(io.BytesIO(response.content))
@@ -78,15 +95,46 @@ def fetch_labels(server: str, name: str) -> tuple[np.ndarray, np.ndarray, int]:
 
 def setup_usb(server: str) -> None:
     """server richtet adb reverse ein, danach erreicht die brille ihn uebers kabel"""
-    response = requests.post(f"{server}/vr/usb", timeout=30)
+    response = _http().post(f"{_url(server)}/vr/usb", timeout=30)
     if response.status_code != 200:
         raise RuntimeError(response.json().get("error", response.text))
 
 
 def fetch_view(server: str) -> dict:
-    response = requests.get(f"{server}/vr/view", timeout=2)
+    response = _http().get(f"{_url(server)}/vr/view", timeout=2)
     response.raise_for_status()
     return response.json()
+
+
+def fetch_current(server: str, name: str) -> dict:
+    """bild das die brille gerade zeigt, vom pc geholt: image (c,z,y,x), scale, evtl. labels und namen"""
+    response = _http().get(f"{_url(server)}/vr/current", params={"name": name}, timeout=120)
+    if response.status_code != 200:
+        raise RuntimeError(response.json().get("error", response.text))
+    data = np.load(io.BytesIO(response.content))
+    return {key: data[key] for key in data.files}
+
+
+def post_napari_view(server: str, view: dict) -> None:
+    _http().post(f"{_url(server)}/vr/napari_view", json=view, timeout=2).raise_for_status()
+
+
+def camera_to_view(view_direction, up_direction, shape_zyx, scale_zyx) -> dict:
+    """gegenstueck zu view_to_camera, richtungen der napari kamera in den volumen raum.
+    nur die richtung, abstand und groesse bleiben in der brille wie sie sind"""
+    extent = np.asarray(shape_zyx, dtype=np.float64) * np.asarray(scale_zyx, dtype=np.float64)
+
+    def to_cube(direction) -> dict:
+        v = np.asarray(direction, dtype=np.float64) / extent
+        v /= np.linalg.norm(v)
+        return {"x": float(v[2]), "y": float(v[1]), "z": float(v[0])}
+
+    return {"camForward": to_cube(view_direction), "camUp": to_cube(up_direction)}
+
+
+def vr_is_active(view: dict, max_age_s: float = 1.5) -> bool:
+    """die brille schickt nur solange sie getragen wird, abgesetzt schlaeft die app ein"""
+    return bool(view) and view.get("age_s") is not None and view["age_s"] <= max_age_s
 
 
 @dataclass
@@ -94,7 +142,8 @@ class CameraState:
     center: tuple[float, float, float]
     view_direction: tuple[float, float, float]
     up_direction: tuple[float, float, float]
-    zoom: float
+    # None heisst zoom in napari lassen wie er ist
+    zoom: float | None
 
 
 def _vec(d: dict) -> np.ndarray:
@@ -103,7 +152,7 @@ def _vec(d: dict) -> np.ndarray:
 
 
 def view_to_camera(view: dict, shape_zyx, scale_zyx, translate_zyx,
-                   canvas_px: float, fov_deg: float) -> CameraState:
+                   canvas_px: float, fov_deg: float, object_centric: bool = False) -> CameraState:
     """blick aus der brille auf eine napari kamera fuer denselben layer.
 
     die app schickt alles im volumen raum, wuerfel von -0.5 bis 0.5 je achse. das ist
@@ -114,7 +163,22 @@ def view_to_camera(view: dict, shape_zyx, scale_zyx, translate_zyx,
     translate = np.asarray(translate_zyx, dtype=np.float64)
     extent = shape * scale
 
-    position = translate + ((_vec(view["camPos"]) + 0.5) * shape - 0.5) * scale
+    cube = _vec(view["camPos"])
+    position = translate + ((cube + 0.5) * shape - 0.5) * scale
+    volume_center = translate + (shape - 1) / 2 * scale
+
+    # von aussen zaehlt von wo man aufs objekt schaut, nicht wohin der kopf zeigt. sonst
+    # verschwindet es aus napari beim blick auf den bildschirm. objekt mittig, zoom bleibt
+    if object_centric and np.max(np.abs(cube)) > 0.5:
+        forward = volume_center - position
+        forward /= np.linalg.norm(forward)
+        up = _vec(view["camUp"]) * extent
+        up -= forward * np.dot(up, forward)
+        if np.linalg.norm(up) < 1e-6:
+            up = np.array([0.0, 1.0, 0.0]) - forward * forward[1]
+        up /= np.linalg.norm(up)
+        return CameraState(tuple(volume_center), tuple(forward), tuple(up), None)
+
     forward = _vec(view["camForward"]) * extent
     forward /= np.linalg.norm(forward)
     up = _vec(view["camUp"]) * extent
@@ -122,7 +186,6 @@ def view_to_camera(view: dict, shape_zyx, scale_zyx, translate_zyx,
     up /= np.linalg.norm(up)
 
     # napari dreht um einen mittelpunkt, der naechste punkt zur volumenmitte auf dem blickstrahl
-    volume_center = translate + (shape - 1) / 2 * scale
     distance = max(float(np.dot(volume_center - position, forward)), 0.05 * float(np.linalg.norm(extent)))
     center = position + forward * distance
 
@@ -134,7 +197,7 @@ def view_to_camera(view: dict, shape_zyx, scale_zyx, translate_zyx,
 def describe_view(view: dict) -> str:
     if not view:
         return "Noch kein Blick aus der Brille empfangen."
-    parts = [f"VR: {view.get('name') or '?'}"]
+    parts = [f"VR: {view.get('name') or '?'}" if vr_is_active(view) else "Brille ist abgesetzt, napari fuehrt"]
     if view.get("selected"):
         parts.append(f"Zelle {view['selected']} ausgewaehlt")
     if view.get("hover"):

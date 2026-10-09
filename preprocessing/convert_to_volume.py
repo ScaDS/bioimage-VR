@@ -10,6 +10,7 @@ usage: python convert_to_volume.py input output.nii.gz
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import nibabel as nib
@@ -263,7 +264,7 @@ UNIT_TO_UM = {"nm": 0.001, "um": 1.0, "µm": 1.0, "micron": 1.0, "mm": 1000.0, "
 
 def read_tiff_spacing(path: str) -> tuple[list[float], str, tuple[int, ...]] | None:
     """voxelgroesse (z,y,x), einheit und form aus einem imagej tiff, sonst None.
-    z steht in imagej 'spacing', x und y als pixel pro einheit in X- und YResolution"""
+    z steht in imagej 'spacing', x und y als pixel pro einheit in XResolution und YResolution"""
     if is_remote(path) or Path(path).suffix.lower() not in (".tif", ".tiff"):
         return None
     import tifffile
@@ -296,8 +297,6 @@ def write_metadata(output_path: Path, voxel_zyx: list[float], unit: str, shape_z
                    channels: list[str] | None = None) -> Path:
     """<stem>_metadata.json neben das volumen, gleiche benennung wie auf der brille.
     voxel_size in der originaleinheit plus voxel_size_um fuer aeltere app staende"""
-    import json
-
     stem = output_path.name.removesuffix(".gz").removesuffix(".nii")
     to_um = UNIT_TO_UM.get(unit, 1.0)
     unit = "µm" if unit in ("um", "micron") else unit

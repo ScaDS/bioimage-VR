@@ -43,6 +43,7 @@ namespace BioimageVR
         {
             public string unit;
             public float length;
+            public float threshold;
             public PointJson[] points;
             public StationJson[] stations;
         }
@@ -54,6 +55,11 @@ namespace BioimageVR
         private StationJson[] stations = Array.Empty<StationJson>();
         private string unit = "";
         private float totalLength;
+        // schwelle mit der der weg gerechnet wurde, 0 wenn die datei sie nicht nennt
+        private float pathThreshold;
+        // schwelle des nutzers vor der fahrt, kommt danach zurueck, unter 0 heisst nichts gemerkt
+        private float userThreshold = -1f;
+        private VolumeContrastControl contrast;
 
         private LineRenderer line;
         private Vector3[] lineBuffer;
@@ -126,6 +132,8 @@ namespace BioimageVR
             riding = false;
             leaving = false;
             autoTarget = -1f;
+            // neues bild startet mit dem standard, nichts zurueckzustellen
+            userThreshold = -1f;
             if (line != null) line.gameObject.SetActive(false);
             if (stationLabel != null) stationLabel.Hide();
 
@@ -155,6 +163,7 @@ namespace BioimageVR
                 stations = parsed.stations ?? Array.Empty<StationJson>();
                 unit = parsed.unit == "um" ? "µm" : parsed.unit ?? "";
                 totalLength = parsed.length;
+                pathThreshold = parsed.threshold;
             }
             catch (Exception e)
             {
@@ -249,6 +258,14 @@ namespace BioimageVR
             forward = Flat(cam.transform.forward, cam.transform.up);
             s = cameraInside ? Nearest(cam.transform.position) : 0f;
             targetWidth = comfortableWidth;
+            // weg gilt nur fuer seine schwelle. bei niedrigerer zaehlt im surface modus rauschen
+            // als wand, man fliegt in einen massiven block. fuer die fahrt umstellen, danach zurueck
+            if (contrast == null) contrast = FindFirstObjectByType<VolumeContrastControl>();
+            if (contrast != null && pathThreshold > 0f)
+            {
+                if (userThreshold < 0f) userThreshold = contrast.CurrentThreshold;
+                contrast.SetThresholdExternal(pathThreshold);
+            }
             // steckt man schon drin, gibt es keine sinnvolle aussenansicht zum zurueckkehren
             if (!cameraInside || startScale <= 0f)
             {
@@ -263,8 +280,15 @@ namespace BioimageVR
             autoTarget = -1f;
         }
 
+        private void RestoreThreshold()
+        {
+            if (contrast != null && userThreshold >= 0f) contrast.SetThresholdExternal(userThreshold);
+            userThreshold = -1f;
+        }
+
         public void End()
         {
+            RestoreThreshold();
             riding = false;
             entering = false;
             leaving = false;
@@ -291,6 +315,7 @@ namespace BioimageVR
             if (!home && Time.time - leavingSince < 10f) return;
             leaving = false;
             riding = false;
+            RestoreThreshold();
             Exited?.Invoke();
         }
 

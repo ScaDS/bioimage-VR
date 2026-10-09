@@ -62,7 +62,7 @@ class Flattener:
         self.strength = strength
         self.zoom = zoom
         self.center_x = center_x
-        # positiv dreht das ergebnis im uhrzeigersinn, 29.09. eric: ca 10 grad noetig
+        # positiv dreht das ergebnis im uhrzeigersinn, 29.09.: ca 10 grad noetig
         self.rotation_deg = rotation_deg
         self._key = None
         self._maps = None

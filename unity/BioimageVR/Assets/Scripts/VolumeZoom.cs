@@ -113,9 +113,16 @@ namespace BioimageVR
 
             if (Mathf.Approximately(zoomDelta, 0f)) return;
 
+            ZoomBy(1f + zoomDelta * zoomSpeed);
+        }
+
+        // skalieren um die eigene mitte, auch fuer den zoom aus napari
+        public void ZoomBy(float factor)
+        {
+            if (!ready) return;
             // nach dem fliegen darf es groesser als das normale maximum sein, nur nicht weiter wachsen
             float upper = Mathf.Max(maxScaleMultiplier, scaleMultiplier);
-            scaleMultiplier = Mathf.Clamp(scaleMultiplier * (1f + zoomDelta * zoomSpeed), minScaleMultiplier, upper);
+            scaleMultiplier = Mathf.Clamp(scaleMultiplier * factor, minScaleMultiplier, upper);
             transform.localScale = baseScale * scaleMultiplier;
         }
     }

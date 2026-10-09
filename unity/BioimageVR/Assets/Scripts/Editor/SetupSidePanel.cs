@@ -150,7 +150,11 @@ namespace BioimageVR.EditorSetup
         {
             var eventSystem = Object.FindFirstObjectByType<EventSystem>();
             if (eventSystem == null) eventSystem = new GameObject("EventSystem", typeof(EventSystem)).GetComponent<EventSystem>();
-            if (eventSystem.GetComponent<XRUIInputModule>() == null) eventSystem.gameObject.AddComponent<XRUIInputModule>();
+            var module = eventSystem.GetComponent<XRUIInputModule>();
+            if (module == null) module = eventSystem.gameObject.AddComponent<XRUIInputModule>();
+            // sticks verstellen sonst den zuletzt angeklickten regler, siehe VolumeToolsUI
+            module.enableGamepadInput = false;
+            module.enableJoystickInput = false;
         }
 
         // reste aelterer setups, alte getrennte panels und das kamera hud mit ecken icons

@@ -359,9 +359,8 @@ Shader "BioimageVR/VolumeRaymarch"
             // tiefe abgetastet"-muster auf, das als sichtbare schichten/ringe um
             // strukturen erscheint (STATUS.md 26.08., Punkt 2 wunschliste, standardtrick
             // gegen raymarch-banding, keine mehrkosten an samples)
-            // 30.09.: interleaved gradient noise (jimenez) statt weissem hash rauschen, eric
-            // fand es koernig. gleichmaessiger verteilt, das muster ist fein statt fleckig,
-            // gleich billig
+            // 30.09.: interleaved gradient noise (jimenez) statt weissem hash rauschen,
+            // das war koernig. gleichmaessiger verteilt, muster fein statt fleckig, gleich billig
             float RayJitter(float2 screenPos)
             {
                 return frac(52.9829189 * frac(dot(floor(screenPos), float2(0.06711056, 0.00583715))));

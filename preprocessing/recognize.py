@@ -29,7 +29,8 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
-from convert_labels import labels_path_for
+import hpc
+from convert_labels import labels_path_for, write_labels_array
 from segment_anatomy import MIN_BODY_EXTENT, metadata_path_for, push, read_voxel_size, segment_body
 
 VLM_BASE = "https://llm.scads.ai/v1"
@@ -218,9 +219,6 @@ def main() -> None:
             print("level 2  a segmentation already lies next to the volume, nothing to do")
             steps.append("cells: existing segmentation kept")
         else:
-            import hpc
-            from convert_labels import write_labels_array
-
             print("level 2  cells: Cellpose-SAM on the cluster")
             try:
                 masks, summary = hpc.segment_cells(args.volume_path, hpc.cellpose_anisotropy(args.volume_path))

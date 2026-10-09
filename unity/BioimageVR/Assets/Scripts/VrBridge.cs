@@ -20,7 +20,7 @@ namespace BioimageVR
         [SerializeField] private VolumeView volumeView;
         [SerializeField] private ChatPanel chatPanel;
         [SerializeField] private float pollInterval = 2f;
-        [SerializeField] private float viewInterval = 0.1f;
+        [SerializeField] private float viewInterval = 0.05f;
         // server nicht erreichbar, dann seltener probieren statt jede zehntelsekunde
         [SerializeField] private float retryInterval = 5f;
 
@@ -45,7 +45,34 @@ namespace BioimageVR
             public int hover;
             public int selected;
             public bool labelsShown;
+            // welche ansicht aus napari schon uebernommen ist, siehe ApplyNapariView
+            public long napariSeq;
         }
+
+        // antwort auf den view post, napari schickt richtungen im selben volumen raum zurueck
+        [Serializable] private class ViewResponse { public NapariView napari; }
+        [Serializable] private class NapariView
+        {
+            public long seq;
+            public Vector3 camForward;
+            public Vector3 camUp;
+            // unter 0 heisst auswahl nicht anfassen
+            public int selected = -1;
+            // alle zoom schritte in napari seit zoomId aufmultipliziert, 0 heisst groesse nicht anfassen
+            public float zoom;
+            public long zoomId;
+        }
+
+        private long appliedNapariSeq;
+        // zieldrehung aus napari, wird weich angefahren statt gesprungen
+        private Quaternion napariTarget;
+        private bool hasNapariTarget;
+        // letzter zoom stand aus napari, nur das verhaeltnis zum neuen wird angewendet.
+        // so bleibt zoomen in der brille erhalten und verlorene nachrichten schaden nicht
+        private long napariZoomId;
+        private float lastNapariZoom;
+        // faktor der noch aussteht, wird wie die drehung weich angefahren
+        private float napariZoomLeft = 1f;
 
         private const string UsbUrl = "http://localhost:8000";
 
@@ -200,9 +227,85 @@ namespace BioimageVR
                     request.timeout = 2;
                     yield return request.SendWebRequest();
                     ok = request.result == UnityWebRequest.Result.Success;
+                    if (ok) ApplyNapariView(request.downloadHandler.text, cam);
                 }
                 yield return new WaitForSeconds(ok ? viewInterval : retryInterval);
             }
+        }
+
+        private void Update()
+        {
+            float blend = 1f - Mathf.Exp(-14f * Time.deltaTime);
+            if (!Mathf.Approximately(napariZoomLeft, 1f))
+            {
+                float step = Mathf.Abs(napariZoomLeft - 1f) < 0.002f ? napariZoomLeft : Mathf.Pow(napariZoomLeft, blend);
+                volumeView.GetComponent<VolumeZoom>()?.ZoomBy(step);
+                napariZoomLeft /= step;
+            }
+
+            if (!hasNapariTarget) return;
+            Transform volume = volumeView.transform;
+            volume.rotation = Quaternion.Slerp(volume.rotation, napariTarget, blend);
+            if (Quaternion.Angle(volume.rotation, napariTarget) < 0.2f)
+            {
+                volume.rotation = napariTarget;
+                hasNapariTarget = false;
+            }
+        }
+
+        // in napari gedreht: volumen um die eigene mitte drehen bis man es aus derselben
+        // richtung sieht. in napari gezoomt: um denselben faktor skalieren. der ort bleibt,
+        // dort gewaehlte zelle auch hier waehlen
+        private void ApplyNapariView(string json, Camera cam)
+        {
+            NapariView view;
+            try
+            {
+                view = JsonUtility.FromJson<ViewResponse>(json)?.napari;
+            }
+            catch (Exception)
+            {
+                return;
+            }
+            if (view == null || view.seq <= appliedNapariSeq) return;
+            appliedNapariSeq = view.seq;
+            if (view.selected >= 0 && volumeView.HasLabels) volumeView.SelectedLabel = view.selected;
+
+            // beim fliegen gehoert die lage dem flug
+            var fly = volumeView.GetComponent<VolumeFly>();
+            bool flying = fly != null && fly.Active;
+            if (view.zoom > 0f)
+            {
+                // neue zoomId heisst napari zaehlt von vorn, dann nur den stand merken
+                if (!flying && view.zoomId == napariZoomId && lastNapariZoom > 0f)
+                    napariZoomLeft *= view.zoom / lastNapariZoom;
+                napariZoomId = view.zoomId;
+                lastNapariZoom = view.zoom;
+            }
+            if (flying)
+            {
+                hasNapariTarget = false;
+                napariZoomLeft = 1f;
+                return;
+            }
+            if (view.camForward.sqrMagnitude < 1e-6f || view.camUp.sqrMagnitude < 1e-6f) return;
+
+            Transform volume = volumeView.transform;
+            // richtungen kommen im einheitswuerfel, erst die achsen skalierung zurueckrechnen
+            Vector3 scale = volume.localScale;
+            Vector3 forwardLocal = Vector3.Scale(view.camForward, scale).normalized;
+            Vector3 upLocal = Vector3.Scale(view.camUp, scale);
+            upLocal = (upLocal - forwardLocal * Vector3.Dot(upLocal, forwardLocal)).normalized;
+
+            Vector3 forwardWorld = volume.position - cam.transform.position;
+            if (forwardWorld.sqrMagnitude < 1e-6f) forwardWorld = cam.transform.forward;
+            forwardWorld.Normalize();
+            Vector3 upWorld = Vector3.up - forwardWorld * Vector3.Dot(Vector3.up, forwardWorld);
+            if (upWorld.sqrMagnitude < 1e-6f) upWorld = cam.transform.up;
+
+            napariTarget = Quaternion.LookRotation(forwardWorld, upWorld.normalized)
+                           * Quaternion.Inverse(Quaternion.LookRotation(forwardLocal, upLocal));
+            hasNapariTarget = true;
         }
 
         private ViewState CurrentView(Camera cam)
@@ -220,6 +323,7 @@ namespace BioimageVR
                 hover = volumeView.HoverLabel,
                 selected = volumeView.SelectedLabel,
                 labelsShown = volumeView.ShowLabels,
+                napariSeq = appliedNapariSeq,
             };
         }
     }

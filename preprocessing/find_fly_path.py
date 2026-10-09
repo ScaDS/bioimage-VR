@@ -27,6 +27,7 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 from scipy import ndimage
+from scipy.signal import find_peaks
 
 PATH_SUFFIX = "_flypath"
 # gleicher startwert wie der threshold regler in der brille
@@ -154,8 +155,6 @@ def sample_clearance(clearance: np.ndarray, points: np.ndarray, open_value: floa
 def find_stations(points: np.ndarray, radius: np.ndarray, length: np.ndarray, voxel: np.ndarray,
                   cap: float, unit: str) -> list[dict]:
     """auffaellige stellen entlang des wegs, rein aus der geometrie"""
-    from scipy.signal import find_peaks
-
     stations: list[dict] = []
     inside = 0
     outside = len(radius)

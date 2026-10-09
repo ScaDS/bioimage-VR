@@ -39,6 +39,7 @@ import nibabel as nib
 import numpy as np
 
 from convert_labels import labels_path_for
+from deploy_to_headset import DEFAULT_PACKAGE, check_single_device, find_adb, push_to_device
 
 DEFAULT_ENV = Path(r"C:\Users\PC\totalseg-env")
 # darunter ist es kein koerperbild mehr, mm
@@ -203,8 +204,6 @@ def segment_body(volume_path: Path, orientation: str | None = None, modality: st
 
 
 def push(paths: list[Path], package: str | None = None, adb: str | None = None) -> None:
-    from deploy_to_headset import DEFAULT_PACKAGE, check_single_device, find_adb, push_to_device
-
     adb = adb or find_adb()
     check_single_device(adb)
     for path in paths:

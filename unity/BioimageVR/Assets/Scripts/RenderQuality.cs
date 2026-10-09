@@ -25,16 +25,8 @@ namespace BioimageVR
 
         private void Start()
         {
-            Level saved = Level.Standard;
-            try
-            {
-                saved = (Level)PlayerPrefs.GetInt(PrefKey, 0);
-            }
-            catch (System.Exception)
-            {
-                // ohne gespeicherten wert bleibt Standard
-            }
-            Apply(saved);
+            // ohne gespeicherten wert bleibt Standard
+            Apply((Level)PlayerPrefs.GetInt(PrefKey, 0));
             ApplySharpening();
             ApplyFoveation();
         }

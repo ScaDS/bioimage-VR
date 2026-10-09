@@ -21,6 +21,9 @@ endpunkte:
     GET  /vr/labels      napari holt die neueste maske, originalgroesse (z,y,x)
     POST /vr/labels      neue masken version, z.b. aus der brille (stufe 3)
     POST /vr/usb         weiterleitung ueber usb kabel einrichten (adb reverse)
+    GET  /vr/current     napari holt das bild das die brille gerade zeigt, samt maske und namen
+    POST /vr/napari_view napari schickt seine ansicht, die brille uebernimmt sie beim naechsten
+                         /vr/view. so kann man zwischen brille und bildschirm wechseln
 """
 
 from __future__ import annotations
@@ -38,8 +41,12 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from convert_labels import labels_path_for, read_labels_zyx, resize_labels_nearest, write_labels_array
 from convert_to_volume import convert_array
+from deploy_to_headset import find_adb, setup_usb_reverse
+from hpc import volume_to_czyx
+from segment_anatomy import metadata_path_for, names_path_for, read_voxel_size
 
-NAPARI_ROOT = Path(__file__).resolve().parent.parent / "data" / "napari"
+DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
+NAPARI_ROOT = DATA_ROOT / "napari"
 
 router = APIRouter(prefix="/vr")
 
@@ -47,6 +54,8 @@ _lock = threading.Lock()
 # seq ist ein zeitstempel in ms, bleibt dadurch auch ueber server neustarts steigend
 _pending = {"seq": 0, "name": None}
 _view: dict = {}
+# ansicht aus napari, seq steigt mit jeder aenderung, die brille meldet zurueck welche sie hat
+_napari_view: dict = {"seq": 0}
 
 
 def _safe_name(raw: str) -> str:
@@ -153,8 +162,6 @@ def push(bundle: UploadFile = File(...), name: str = Form("napari"), denoise: bo
 
 def setup_usb(port: int = 8000) -> str | None:
     """adb reverse fuer eine per usb verbundene brille, gibt None bei erfolg sonst den grund"""
-    from deploy_to_headset import find_adb, setup_usb_reverse
-
     try:
         setup_usb_reverse(find_adb(), port)
         return None
@@ -206,9 +213,62 @@ async def post_view(request: Request) -> JSONResponse:
         return JSONResponse({"error": "kein json"}, status_code=400)
     view["received_at"] = time.time()
     with _lock:
-        _view.clear()
-        _view.update(view)
-    return JSONResponse({"ok": True})
+        napari_view = dict(_napari_view)
+        # blick der brille verwerfen solange sie die neueste napari ansicht nicht uebernommen
+        # hat, sonst springt napari kurz auf den alten stand zurueck
+        if int(view.get("napariSeq") or 0) >= napari_view["seq"]:
+            _view.clear()
+            _view.update(view)
+    return JSONResponse({"ok": True, "napari": napari_view})
+
+
+@router.post("/napari_view")
+async def post_napari_view(request: Request) -> JSONResponse:
+    try:
+        view = await request.json()
+    except Exception:
+        return JSONResponse({"error": "kein json"}, status_code=400)
+    with _lock:
+        view["seq"] = int(time.time() * 1000)
+        _napari_view.clear()
+        _napari_view.update(view)
+    return JSONResponse({"ok": True, "seq": view["seq"]})
+
+
+def _find_volume(name: str) -> Path | None:
+    """volumen mit diesem namen irgendwo unter data, sicherungen ausgenommen"""
+    candidates = [p for p in DATA_ROOT.rglob(f"{name}.nii.gz") if "backup" not in str(p).lower()]
+    return max(candidates, key=lambda p: p.stat().st_mtime) if candidates else None
+
+
+@router.get("/current", response_model=None)
+def current(name: str):
+    """bild, maske und namen so wie die brille sie zeigt, fuer napari als (c,z,y,x)"""
+    safe = _safe_name(name)
+    volume_path = _find_volume(safe)
+    if volume_path is None:
+        return JSONResponse({"error": f"'{safe}' liegt nicht auf dem PC unter data"}, status_code=404)
+
+    arrays = {"image": volume_to_czyx(volume_path)}
+    metadata_path = metadata_path_for(volume_path)
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path else {}
+    voxel, unit = read_voxel_size(metadata)
+    arrays["scale"] = np.asarray([1.0, 1.0, 1.0] if voxel is None else [voxel[2], voxel[1], voxel[0]])
+    arrays["unit"] = np.asarray(unit or "")
+    arrays["channel_names"] = np.asarray([str(c) for c in metadata.get("channels") or []])
+
+    labels_path = labels_path_for(volume_path)
+    if labels_path.is_file():
+        arrays["labels"] = read_labels_zyx(labels_path)
+        names_path = names_path_for(volume_path)
+        if names_path.is_file():
+            entries = json.loads(names_path.read_text(encoding="utf-8")).get("labels", [])
+            arrays["label_ids"] = np.asarray([e["id"] for e in entries], dtype=np.int32)
+            arrays["label_names"] = np.asarray([e["name"] for e in entries])
+
+    buffer = io.BytesIO()
+    np.savez_compressed(buffer, **arrays)
+    return Response(buffer.getvalue(), media_type="application/octet-stream")
 
 
 @router.get("/view")

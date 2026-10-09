@@ -4380,7 +4380,7 @@ MonoBehaviour:
   volumeView: {fileID: 336283422}
   chatPanel: {fileID: 1076142107}
   pollInterval: 2
-  viewInterval: 0.1
+  viewInterval: 0.05
   retryInterval: 5
 --- !u!114 &1076142106
 MonoBehaviour:
@@ -5809,8 +5809,8 @@ MonoBehaviour:
   m_EnableXRInput: 1
   m_EnableMouseInput: 1
   m_EnableTouchInput: 1
-  m_EnableGamepadInput: 1
-  m_EnableJoystickInput: 1
+  m_EnableGamepadInput: 0
+  m_EnableJoystickInput: 0
   m_PointAction: {fileID: 0}
   m_LeftClickAction: {fileID: 0}
   m_MiddleClickAction: {fileID: 0}

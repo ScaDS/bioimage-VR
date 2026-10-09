@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.IO;
 using TMPro;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using UnityEngine.XR.Interaction.Toolkit.UI;
 
@@ -60,6 +61,7 @@ namespace BioimageVR
         private void Start()
         {
             volumeFly = volumeView.GetComponent<VolumeFly>();
+            DisableStickNavigation();
             BuildRail();
             BuildOptions();
             BuildCard();
@@ -67,6 +69,17 @@ namespace BioimageVR
             if (labelEditor != null) labelEditor.Changed += () => messageUntil = Time.time + MessageSeconds;
             if (volumeView != null) volumeView.OnVolumeLoaded += _ => isolated = 0;
             RefreshTools();
+        }
+
+        // quest meldet controller auch als gamepad, ui modul verschiebt damit den zuletzt
+        // angeklickten regler. sticks gehoeren dem volumen, ui nur per strahl
+        private static void DisableStickNavigation()
+        {
+            var eventSystem = EventSystem.current;
+            var module = eventSystem != null ? eventSystem.GetComponent<XRUIInputModule>() : null;
+            if (module == null) return;
+            module.enableGamepadInput = false;
+            module.enableJoystickInput = false;
         }
 
         // canvas neben dem volumen, pivot an der seite die zum volumen zeigt

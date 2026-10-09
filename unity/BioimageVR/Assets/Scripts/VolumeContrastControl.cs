@@ -51,6 +51,15 @@ namespace BioimageVR
             if (volumeRenderer != null) volumeRenderer.material.SetFloat(ThresholdId, value);
         }
 
+        public float CurrentThreshold
+        {
+            get
+            {
+                if (volumeRenderer == null && volumeView != null) volumeRenderer = volumeView.GetComponent<Renderer>();
+                return volumeRenderer != null ? volumeRenderer.material.GetFloat(ThresholdId) : 0f;
+            }
+        }
+
         // fuer aufrufer ausserhalb des reglers, z.b. VLMToolDispatcher
         public void SetThresholdExternal(float value)
         {

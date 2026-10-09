@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import threading
 import time
 
 import napari
 import numpy as np
+import pandas as pd
 from napari.layers import Image, Labels
 from napari.qt.threading import thread_worker
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QImage, QPixmap
 from qtpy.QtWidgets import (
     QAbstractItemView,
@@ -16,6 +18,7 @@ from qtpy.QtWidgets import (
     QComboBox,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -31,6 +34,10 @@ from . import _bridge, _video
 NO_LABELS = "(keine Maske)"
 # sichtfeld der napari kamera im live modus, ungefaehr wie in der quest
 LIVE_FOV_DEG = 60.0
+# ab dieser groesse wird fuer die anzeige verkleinert
+DISPLAY_VOXELS = 4_000_000
+# wer die ansicht vorgibt, reihenfolge wie die knoepfe
+LEAD_AUTO, LEAD_VR, LEAD_NAPARI = range(3)
 
 
 class BioimageVRWidget(QWidget):
@@ -39,8 +46,41 @@ class BioimageVRWidget(QWidget):
         self.viewer = napari_viewer
         self._live_worker = None
         self._last_selected = 0
+        # name des bilds das gerade aus der brille nachgeladen wird bzw. wurde
+        self._fetching = None
+        self._followed = None
+        self._vr_active = False
+        self._last_sent = 0.0
+        # neuester blick aus der brille, timer wendet nur den letzten an.
+        # jeden einzeln abarbeiten staut sich, man sieht dann nur die endstellung
+        self._latest_view = None
+        self._applied_view = None
+        # eigene kamera aenderungen von denen aus der brille unterscheiden
+        self._applying = False
+        self._napari_leads_until = 0.0
+        self._camera_connected = False
+        self._lead = LEAD_AUTO
+        self._outbox = None
+        self._outbox_ready = threading.Event()
+        threading.Thread(target=self._send_loop, daemon=True).start()
+        self._watched_labels = None
+        self._highlighted = None
+        self._view_timer = QTimer(self)
+        self._view_timer.setInterval(40)
+        self._view_timer.timeout.connect(self._apply_latest_view)
+        # zoom der kamera beim letzten ereignis, daraus der faktor je schritt
+        self._zoom_seen = None
+        # alle eigenen zoom schritte aufmultipliziert, die brille wendet das verhaeltnis zum letzten stand an
+        self._zoom_factor = 1.0
+        # neu je fenster, die brille merkt daran dass der faktor wieder bei 1 anfaengt
+        self._zoom_id = int(time.time() * 1000)
+        # schickt den letzten stand nach, wenn das ereignis dazu in die drosselung fiel
+        self._send_timer = QTimer(self)
+        self._send_timer.setSingleShot(True)
+        self._send_timer.setInterval(60)
+        self._send_timer.timeout.connect(self._send_trailing)
 
-        self.server_edit = QLineEdit("http://localhost:8000")
+        self.server_edit = QLineEdit("http://127.0.0.1:8000")
         self.usb_button = QPushButton("Brille per USB verbinden")
         self.usb_button.setToolTip("Fuer Netze, in denen Brille und PC sich nicht sehen, z.B. eduroam. "
                                    "Nach jedem neuen Einstecken nochmal druecken.")
@@ -52,8 +92,31 @@ class BioimageVRWidget(QWidget):
         self.denoise_check = QCheckBox("Entrauschen (Median 3x3x3)")
         self.to_vr_button = QPushButton("To VR")
         self.from_vr_button = QPushButton("From VR")
-        self.live_check = QCheckBox("Blick aus der Brille live spiegeln")
+        self.live_check = QCheckBox("Mit der Brille synchron halten")
         self.highlight_check = QCheckBox("Nur die in VR ausgewaehlte Zelle zeigen")
+        # automatisch: getragen die brille, abgesetzt napari, drehen mit der maus uebernimmt kurz.
+        # napari steuert: arbeiten am rechner mit aufgesetzter brille
+        self.lead_buttons = []
+        for index, text in enumerate(["Automatisch", "Brille steuert", "napari steuert"]):
+            button = QPushButton(text)
+            button.setCheckable(True)
+            button.setMinimumHeight(34)
+            button.setChecked(index == LEAD_AUTO)
+            button.clicked.connect(lambda _=False, i=index: self._set_lead(i))
+            self.lead_buttons.append(button)
+        self.lead_buttons[LEAD_AUTO].setToolTip("Getragen steuert die Brille, abgesetzt napari. "
+                                                "Wer in napari mit der Maus dreht oder zoomt, uebernimmt kurz.")
+        self.lead_buttons[LEAD_VR].setToolTip("napari folgt nur, Drehen und Zoomen mit der Maus "
+                                              "aendert in der Brille nichts.")
+        self.lead_buttons[LEAD_NAPARI].setToolTip("Zum Arbeiten am Rechner mit aufgesetzter Brille: "
+                                                  "Drehen, Zoomen mit dem Mausrad und Auswaehlen in napari "
+                                                  "kommt in der Brille an.")
+        self.lead_label = QLabel("Kopplung ist aus")
+        self.lead_label.setStyleSheet("font-weight: bold;")
+        self.fast_check = QCheckBox("Schnelle Anzeige (grosse Bilder verkleinert)")
+        self.fast_check.setChecked(True)
+        self.fast_check.setToolTip("Bilder aus der Brille werden fuer napari auf etwa 4 Mio. Voxel verkleinert, "
+                                   "sonst kommt das Mitdrehen auf schwachen Grafikkarten nicht hinterher.")
         self.video_check = QCheckBox("Video aus der Brille zeigen (USB)")
         self.eye_combo = QComboBox()
         self.eye_combo.addItems(["links", "rechts", "beide"])
@@ -82,8 +145,8 @@ class BioimageVRWidget(QWidget):
         back_box = QGroupBox("Aus der Brille")
         back_layout = QVBoxLayout(back_box)
         back_layout.addWidget(self.from_vr_button)
-        back_layout.addWidget(self.live_check)
         back_layout.addWidget(self.highlight_check)
+        back_layout.addWidget(self.fast_check)
 
         video_box = QGroupBox("Video aus der Brille")
         video_form = QFormLayout(video_box)
@@ -102,6 +165,15 @@ class BioimageVRWidget(QWidget):
         server_form.addRow("Server", self.server_edit)
         server_form.addRow(self.usb_button)
         layout.addLayout(server_form)
+        sync_box = QGroupBox("Wer steuert die Ansicht")
+        sync_layout = QVBoxLayout(sync_box)
+        sync_layout.addWidget(self.live_check)
+        lead_row = QHBoxLayout()
+        for button in self.lead_buttons:
+            lead_row.addWidget(button)
+        sync_layout.addLayout(lead_row)
+        sync_layout.addWidget(self.lead_label)
+        layout.addWidget(sync_box)
         layout.addWidget(send_box)
         layout.addWidget(back_box)
         layout.addWidget(video_box)
@@ -258,38 +330,240 @@ class BioimageVRWidget(QWidget):
             if self._live_worker is not None:
                 self._live_worker.quit()
                 self._live_worker = None
+            self._view_timer.stop()
+            self._show_lead()
             self._status("Live-Ansicht aus.")
             return
 
         self.viewer.dims.ndisplay = 3
         _camera(self.viewer).perspective = LIVE_FOV_DEG
         self._live_worker = _poll_view(self.server)
-        self._live_worker.yielded.connect(self._apply_view)
+        self._live_worker.yielded.connect(self._remember_view)
         self._live_worker.start()
+        self._view_timer.start()
+        # andersherum: drehen und zoomen in napari geht an die brille, solange die abgesetzt ist
+        if not self._camera_connected:
+            self._zoom_seen = float(_camera(self.viewer).zoom)
+            _camera(self.viewer).events.angles.connect(self._camera_moved)
+            _camera(self.viewer).events.zoom.connect(self._camera_zoomed)
+            self._camera_connected = True
+
+    def _set_lead(self, index: int) -> None:
+        self._lead = index
+        for i, button in enumerate(self.lead_buttons):
+            button.setChecked(i == index)
+        # gleich die eigene ansicht schicken, sonst tut sich in der brille erst beim naechsten drehen was
+        if index == LEAD_NAPARI and self._live_worker is not None:
+            self._send_view(selected=-1)
+        self._show_lead()
+
+    def _show_lead(self) -> None:
+        if self._live_worker is None:
+            self.lead_label.setText("Kopplung ist aus")
+        elif self._napari_leads():
+            self.lead_label.setText("Jetzt steuert: napari (Maus und Tastatur)")
+        else:
+            self.lead_label.setText("Jetzt steuert: die Brille")
+
+    def _napari_leads(self) -> bool:
+        if self._lead == LEAD_VR:
+            return False
+        if self._lead == LEAD_NAPARI:
+            return True
+        return not self._vr_active or time.time() < self._napari_leads_until
+
+    def _camera_moved(self, event=None) -> None:
+        """mit maus oder tastatur gedreht, die brille dreht das volumen passend mit"""
+        if self._live_worker is None or self._applying or self._lead == LEAD_VR:
+            return
+        # wer hier dreht fuehrt kurz, auch wenn die brille gerade getragen wird
+        self._napari_leads_until = time.time() + 1.5
+        if time.time() - self._last_sent < 0.06:
+            self._send_timer.start()
+            return
+        self._send_view(selected=-1)
+
+    def _send_trailing(self) -> None:
+        if self._live_worker is not None and self._lead != LEAD_VR:
+            self._send_view(selected=-1)
+
+    def _camera_zoomed(self, event=None) -> None:
+        """mit dem mausrad gezoomt, die brille skaliert das volumen um denselben faktor"""
+        zoom = float(_camera(self.viewer).zoom)
+        ratio = zoom / self._zoom_seen if self._zoom_seen else 1.0
+        self._zoom_seen = zoom
+        # zoom den die brille oder ein neu geladenes bild gesetzt hat zaehlt nicht mit
+        if self._live_worker is None or self._applying or self._lead == LEAD_VR:
+            return
+        self._zoom_factor *= ratio
+        self._camera_moved()
+
+    def _send_view(self, selected: int) -> None:
+        reference = self._reference_layer()
+        if reference is None:
+            return
+        camera = _camera(self.viewer)
+        view = _bridge.camera_to_view(camera.view_direction, camera.up_direction,
+                                      _layer_shape(reference), reference.scale[-3:])
+        # -1 heisst auswahl in der brille nicht anfassen
+        view["selected"] = int(selected)
+        view["zoom"] = self._zoom_factor
+        view["zoomId"] = self._zoom_id
+        self._last_sent = time.time()
+        # nicht im fenster thread schicken, haengende anfrage friert sonst das drehen ein
+        self._outbox = view
+        self._outbox_ready.set()
+
+    def _send_loop(self) -> None:
+        """schickt immer nur die neueste ansicht, aeltere fallen weg"""
+        while True:
+            self._outbox_ready.wait()
+            self._outbox_ready.clear()
+            view, self._outbox = self._outbox, None
+            if view is None:
+                continue
+            try:
+                _bridge.post_napari_view(self.server, view)
+            except Exception:
+                pass
+
+    def _label_picked(self, event=None) -> None:
+        """in napari eine andere zelle gewaehlt, in der brille dieselbe auswaehlen"""
+        layer = self._watched_labels
+        if layer is None or self._applying or self._live_worker is None or self._lead == LEAD_VR:
+            return
+        self._last_selected = int(layer.selected_label)
+        self._send_view(selected=int(layer.selected_label))
+
+    def _follow_volume(self, name: str) -> None:
+        """die brille zeigt ein bild das napari noch nicht hat, vom pc nachladen"""
+        if not name or name == self._followed or self._fetching:
+            return
+        if name in self.viewer.layers:
+            self._select_followed(name)
+            return
+        self._fetching = name
+        self._status(f"Hole '{name}', das die Brille gerade zeigt ...")
+        worker = thread_worker(_bridge.fetch_current)(self.server, name)
+        worker.returned.connect(lambda data: self._show_current(name, data))
+        worker.errored.connect(lambda error: self._follow_failed(name, error))
+        worker.start()
+
+    def _follow_failed(self, name: str, error) -> None:
+        # als erledigt merken, sonst neuer versuch bei jedem blick
+        self._fetching = None
+        self._followed = name
+        self._status(f"'{name}' nicht geholt: {error}")
+
+    def _show_current(self, name: str, data: dict) -> None:
+        self._fetching = None
+        scale = tuple(float(v) for v in data["scale"])
+        image = data["image"]
+        labels = data.get("labels")
+        # nur jede nte stelle je achse, blick rechnet ueber groesse mal scale und passt weiter
+        step = _display_step(image.shape[1:]) if self.fast_check.isChecked() else 1
+        if step > 1:
+            image = image[:, ::step, ::step, ::step]
+            labels = labels[::step, ::step, ::step] if labels is not None else None
+            scale = tuple(s * step for s in scale)
+        channel_names = [str(n) for n in data.get("channel_names", [])]
+        colormaps = ["gray"] if image.shape[0] == 1 else ["red", "green", "blue"]
+        # das erste bild stellt den zoom in napari neu ein, das soll nicht als zoomen an die brille
+        self._applying = True
+        try:
+            for c in range(image.shape[0]):
+                layer_name = name if c == 0 else f"{name} {channel_names[c] if c < len(channel_names) else c}"
+                self.viewer.add_image(image[c], name=layer_name, scale=scale,
+                                      colormap=colormaps[c % len(colormaps)],
+                                      blending="translucent" if c == 0 else "additive", rendering="attenuated_mip")
+        finally:
+            self._applying = False
+        if labels is not None:
+            labels_layer = self.viewer.add_labels(labels, name=f"{name} labels", scale=scale)
+            if "label_ids" in data:
+                # name der struktur erscheint in der statuszeile wenn die maus drauf zeigt
+                labels_layer.features = pd.DataFrame({
+                    "index": [int(i) for i in data["label_ids"]],
+                    "name": [str(n) for n in data["label_names"]],
+                })
+        self._select_followed(name)
+        self._highlighted = None
+        self._applied_view = None
+        note = f", fuer die Anzeige jede {step}. Stelle" if step > 1 else ""
+        self._status(f"'{name}' aus der Brille uebernommen{note}.")
+
+    def _select_followed(self, name: str) -> None:
+        """dieses bild ist ab jetzt die bezugsgroesse fuer den blick"""
+        self._followed = name
+        self._refresh_layers()
+        for i in range(self.image_list.count()):
+            item = self.image_list.item(i)
+            item.setSelected(item.text() == name)
+        index = self.labels_combo.findText(f"{name} labels")
+        if index > 0:
+            self.labels_combo.setCurrentIndex(index)
+
+    def _remember_view(self, view: dict) -> None:
+        self._latest_view = view
+
+    def _apply_latest_view(self) -> None:
+        view, self._latest_view = self._latest_view, None
+        if view is not None:
+            self._apply_view(view)
+
+    @staticmethod
+    def _pose(view: dict) -> tuple:
+        return tuple(round(float(view[key][axis]), 3) for key in ("camPos", "camForward", "camUp") for axis in "xyz")
 
     def _apply_view(self, view: dict) -> None:
         self._status(_bridge.describe_view(view))
+        self._vr_active = _bridge.vr_is_active(view)
+        self._show_lead()
+        if view.get("name"):
+            self._follow_volume(str(view["name"]))
         reference = self._reference_layer()
-        if not view or "camPos" not in view or reference is None:
+        # fuehrt napari, nicht mit dem blick der brille ueberschreiben
+        if self._napari_leads() or "camPos" not in view or reference is None:
             return
+
+        # steht die brille still, nicht jedes mal neu zeichnen
+        pose = (reference.name, self._pose(view))
+        self._apply_selection(int(view.get("selected") or 0))
+        if pose == self._applied_view:
+            return
+        self._applied_view = pose
 
         shape = _layer_shape(reference)
         state = _bridge.view_to_camera(view, shape, reference.scale[-3:], reference.translate[-3:],
-                                       _canvas_size(self.viewer), LIVE_FOV_DEG)
+                                       _canvas_size(self.viewer), LIVE_FOV_DEG, object_centric=True)
         camera = _camera(self.viewer)
-        camera.center = state.center
-        camera.set_view_direction(state.view_direction, up_direction=state.up_direction)
-        camera.zoom = state.zoom
-
-        self._apply_selection(int(view.get("selected") or 0))
+        self._applying = True
+        try:
+            camera.center = state.center
+            camera.set_view_direction(state.view_direction, up_direction=state.up_direction)
+            if state.zoom is not None:
+                camera.zoom = state.zoom
+        finally:
+            self._applying = False
 
     def _apply_selection(self, selected: int) -> None:
         labels_layer = self._selected_labels()
         if labels_layer is None:
             return
+        if labels_layer is not self._watched_labels:
+            labels_layer.events.selected_label.connect(self._label_picked)
+            self._watched_labels = labels_layer
         if selected and selected != self._last_selected:
-            labels_layer.selected_label = selected
-        labels_layer.show_selected_label = bool(selected) and self.highlight_check.isChecked()
+            self._applying = True
+            try:
+                labels_layer.selected_label = selected
+            finally:
+                self._applying = False
+        # nur bei aenderung setzen, napari faerbt sonst jedes mal die ganze maske neu
+        highlight = bool(selected) and self.highlight_check.isChecked()
+        if highlight != self._highlighted:
+            labels_layer.show_selected_label = highlight
+            self._highlighted = highlight
         self._last_selected = selected
 
     # video, variante A
@@ -399,14 +673,19 @@ class VideoPanel(QLabel):
 
 @thread_worker
 def _poll_view(server: str):
-    """blick etwa zehnmal pro sekunde, fehler nur melden statt abzubrechen"""
+    """blick etwa zwanzigmal pro sekunde, fehler nur melden statt abzubrechen"""
     while True:
         try:
             yield _bridge.fetch_view(server)
-            time.sleep(0.1)
+            time.sleep(0.05)
         except Exception:
             yield {}
             time.sleep(2)
+
+
+def _display_step(shape_zyx) -> int:
+    voxels = float(np.prod(shape_zyx))
+    return max(int(np.ceil((voxels / DISPLAY_VOXELS) ** (1.0 / 3.0))), 1)
 
 
 def _layer_data(layer) -> np.ndarray:

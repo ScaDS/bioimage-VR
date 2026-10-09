@@ -34,6 +34,9 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 
+from convert_labels import labels_path_for, write_labels_array
+from segment_anatomy import metadata_path_for, push, read_voxel_size
+
 HOST = os.environ.get("BIOIMAGE_VR_HPC_HOST", "leipzig-hpc")
 WORKSPACE = "bioimage-vr"
 PYTHON_MODULE = "Python/3.10.8-GCCcore-12.2.0"
@@ -120,8 +123,6 @@ def volume_to_czyx(volume_path: Path) -> np.ndarray:
 
 def anisotropy_for(volume_path: Path) -> float | None:
     """z voxelgroesse durch xy, None wenn die metadaten fehlen"""
-    from segment_anatomy import metadata_path_for, read_voxel_size
-
     metadata_path = metadata_path_for(volume_path)
     if not metadata_path:
         return None
@@ -189,8 +190,6 @@ def main() -> None:
     parser.add_argument("--push", action="store_true", help="Also adb push the mask to the headset")
     args = parser.parse_args()
 
-    from convert_labels import labels_path_for, write_labels_array
-
     if not args.volume_path.is_file():
         sys.exit(f"Volume '{args.volume_path}' not found.")
     if labels_path_for(args.volume_path).exists() and not args.overwrite:
@@ -200,8 +199,6 @@ def main() -> None:
     print(f"{summary['cells']} cells in {summary['seconds']} s on the cluster")
     labels_path = write_labels_array(masks, args.volume_path)
     if args.push:
-        from segment_anatomy import push
-
         push([labels_path])
 
 
