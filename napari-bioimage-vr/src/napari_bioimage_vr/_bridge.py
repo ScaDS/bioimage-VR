@@ -5,16 +5,28 @@ gegenstueck zu preprocessing/vr_bridge.py auf dem server und VrBridge.cs in der 
 
 from __future__ import annotations
 
+import atexit
 import io
 import math
+import os
 import re
+import subprocess
+import sys
+import tempfile
 import threading
+import time
 from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urlparse
 
 import numpy as np
 import requests
 
 MAX_CHANNELS = 3
+# liegt nur bei einer installation aus dem repo (pip install -e) an dieser stelle
+SERVER_SCRIPT = Path(__file__).resolve().parents[3] / "preprocessing" / "upload_server.py"
+SERVER_PORT = 8000
+SERVER_LOG = Path(tempfile.gettempdir()) / "bioimage_vr_server.log"
 
 # eine verbindung je thread offen halten statt fuer jede anfrage eine neue
 _local = threading.local()
@@ -104,6 +116,53 @@ def fetch_view(server: str) -> dict:
     response = _http().get(f"{_url(server)}/vr/view", timeout=2)
     response.raise_for_status()
     return response.json()
+
+
+def headset_active(server: str) -> bool | None:
+    """zeigt die brille gerade ein bild, None wenn der server nicht antwortet"""
+    try:
+        return vr_is_active(fetch_view(server))
+    except requests.RequestException:
+        return None
+
+
+def can_start_server(server: str) -> bool:
+    """nur der server auf diesem rechner laesst sich von hier starten, und der hoert fest auf 8000"""
+    url = urlparse(_url(server))
+    return url.hostname == "127.0.0.1" and (url.port or 80) == SERVER_PORT and SERVER_SCRIPT.is_file()
+
+
+def _server_pythons() -> list[str]:
+    """der server braucht fastapi und co, die liegen oft nicht in der napari umgebung.
+    erst die eigene probieren, dann das python aus dem die umgebung gebaut ist"""
+    base = Path(sys.base_prefix) / ("python.exe" if os.name == "nt" else "bin/python3")
+    candidates = [os.environ.get("BIOIMAGE_VR_SERVER_PYTHON"), sys.executable, str(base)]
+    found = []
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file() and candidate not in found:
+            found.append(candidate)
+    return found
+
+
+def start_server(server: str, wait_s: float = 90.0) -> None:
+    """upload_server.py im hintergrund starten und warten bis er antwortet.
+    laeuft ohne fenster, ausgabe in SERVER_LOG, endet mit napari"""
+    for python in _server_pythons():
+        with open(SERVER_LOG, "ab") as log:
+            process = subprocess.Popen(
+                [python, str(SERVER_SCRIPT)], cwd=SERVER_SCRIPT.parent, stdin=subprocess.DEVNULL,
+                stdout=log, stderr=subprocess.STDOUT, env={**os.environ, "PYTHONUTF8": "1"},
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        deadline = time.monotonic() + wait_s
+        # beendet sich der prozess gleich wieder, fehlen dort die pakete, dann das naechste python
+        while process.poll() is None and time.monotonic() < deadline:
+            if headset_active(server) is not None:
+                atexit.register(process.terminate)
+                return
+            time.sleep(1)
+        if process.poll() is None:
+            process.terminate()
+    raise RuntimeError(f"Server startet nicht, Ausgabe in {SERVER_LOG}")
 
 
 def fetch_current(server: str, name: str) -> dict:

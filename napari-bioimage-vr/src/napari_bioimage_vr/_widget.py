@@ -79,6 +79,14 @@ class BioimageVRWidget(QWidget):
         self._send_timer.setSingleShot(True)
         self._send_timer.setInterval(60)
         self._send_timer.timeout.connect(self._send_trailing)
+        # schaut solange die kopplung aus ist nach, ob die brille ein bild zeigt, und schaltet sie dann ein
+        self._presence_busy = False
+        self._server_tried = False
+        # von hand ausgeschaltet, dann bleibt es aus bis die brille einmal abgesetzt war
+        self._auto_blocked = False
+        self._presence_timer = QTimer(self)
+        self._presence_timer.setInterval(2000)
+        self._presence_timer.timeout.connect(self._check_presence)
 
         self.server_edit = QLineEdit("http://127.0.0.1:8000")
         self.usb_button = QPushButton("Brille per USB verbinden")
@@ -93,6 +101,8 @@ class BioimageVRWidget(QWidget):
         self.to_vr_button = QPushButton("To VR")
         self.from_vr_button = QPushButton("From VR")
         self.live_check = QCheckBox("Mit der Brille synchron halten")
+        self.live_check.setToolTip("Geht von selbst an, sobald die Brille ein Bild zeigt. "
+                                   "Von Hand ausgeschaltet bleibt es aus, bis die Brille einmal abgesetzt war.")
         self.highlight_check = QCheckBox("Nur die in VR ausgewaehlte Zelle zeigen")
         # automatisch: getragen die brille, abgesetzt napari, drehen mit der maus uebernimmt kurz.
         # napari steuert: arbeiten am rechner mit aufgesetzter brille
@@ -184,6 +194,8 @@ class BioimageVRWidget(QWidget):
         self.to_vr_button.clicked.connect(self._to_vr)
         self.from_vr_button.clicked.connect(self._from_vr)
         self.live_check.toggled.connect(self._toggle_live)
+        # clicked kommt nur vom nutzer, nicht vom automatischen einschalten
+        self.live_check.clicked.connect(self._live_clicked)
         self.video_check.toggled.connect(self._toggle_video)
         self.snapshot_button.clicked.connect(self._snapshot)
         self.flat_check.toggled.connect(self._update_flattener)
@@ -199,6 +211,8 @@ class BioimageVRWidget(QWidget):
         self.viewer.layers.events.inserted.connect(self._refresh_layers)
         self.viewer.layers.events.removed.connect(self._refresh_layers)
         self._refresh_layers()
+        self._presence_timer.start()
+        self._check_presence()
 
     @property
     def server(self) -> str:
@@ -206,6 +220,43 @@ class BioimageVRWidget(QWidget):
 
     def _status(self, text: str) -> None:
         self.status_label.setText(text)
+
+    # von selbst verbinden
+
+    def _check_presence(self) -> None:
+        if self._live_worker is not None or self._presence_busy:
+            return
+        self._presence_busy = True
+        worker = thread_worker(_bridge.headset_active)(self.server)
+        worker.returned.connect(self._presence_known)
+        worker.errored.connect(lambda error: self._presence_known(False))
+        worker.start()
+
+    def _presence_known(self, active) -> None:
+        self._presence_busy = False
+        if active is None:
+            self._start_server()
+        elif not active:
+            self._auto_blocked = False
+        elif not self._auto_blocked and self._live_worker is None:
+            self.live_check.setChecked(True)
+
+    def _start_server(self) -> None:
+        """server laeuft nicht, den aus dem repo einmal selbst starten"""
+        if self._server_tried or not _bridge.can_start_server(self.server):
+            return
+        self._server_tried = True
+        self._presence_busy = True
+        self._status("Server auf dem PC laeuft nicht, wird gestartet ...")
+        worker = thread_worker(_bridge.start_server)(self.server)
+        worker.returned.connect(lambda _: self._status("Server gestartet. Sobald die Brille ein Bild zeigt, "
+                                                       "erscheint es hier."))
+        worker.errored.connect(lambda error: self._status(f"{error}"))
+        worker.finished.connect(lambda: setattr(self, "_presence_busy", False))
+        worker.start()
+
+    def _live_clicked(self, on: bool) -> None:
+        self._auto_blocked = not on
 
     # usb
 
@@ -347,6 +398,7 @@ class BioimageVRWidget(QWidget):
             _camera(self.viewer).events.angles.connect(self._camera_moved)
             _camera(self.viewer).events.zoom.connect(self._camera_zoomed)
             self._camera_connected = True
+        self._show_lead()
 
     def _set_lead(self, index: int) -> None:
         self._lead = index
@@ -640,6 +692,7 @@ class BioimageVRWidget(QWidget):
         self._status(f"Standbild als '{layer.name}' uebernommen.")
 
     def closeEvent(self, event) -> None:
+        self._presence_timer.stop()
         self.live_check.setChecked(False)
         self.video_check.setChecked(False)
         super().closeEvent(event)
