@@ -12,6 +12,7 @@ namespace BioimageVR
     // teilen schneidet eine zelle entlang der ebene aus SplitPlaneTool in zwei
     // jede aenderung landet auf der undo liste, speichern schreibt lokal und schickt an den pc
     // textur wird nur im geaenderten bereich neu hochgeladen, sonst 35 mb pro klick
+    // in napari gemalte aenderungen kommen als ausschnitt ueber VrBridge, siehe ApplyPatch
     [RequireComponent(typeof(VolumeView))]
     public class LabelEditor : MonoBehaviour
     {
@@ -273,6 +274,75 @@ namespace BioimageVR
             volumeView.SelectedLabel = 0;
         }
 
+        // aus napari
+
+        // ausschnitt der maske aus napari einsetzen, werte als uint16 mit x am schnellsten.
+        // betroffene zellen werden neu vermessen, neue nummern kommen dazu
+        public bool ApplyPatch(Vector3Int min, Vector3Int size, byte[] data)
+        {
+            if (!Available) return false;
+            Vector3Int max = min + size - Vector3Int.one;
+            if (min.x < 0 || min.y < 0 || min.z < 0 || size.x <= 0 || size.y <= 0 || size.z <= 0
+                || max.x >= Vol.SizeX || max.y >= Vol.SizeY || max.z >= Vol.SizeZ
+                || data == null || data.Length != size.x * size.y * size.z * 2) return false;
+
+            ushort[] labels = Vol.Labels;
+            var touched = new HashSet<int>();
+            int highest = 0, k = 0;
+            for (int z = min.z; z <= max.z; z++)
+            for (int y = min.y; y <= max.y; y++)
+            {
+                int row = Vol.SizeX * (y + Vol.SizeY * z);
+                for (int x = min.x; x <= max.x; x++, k += 2)
+                {
+                    ushort value = (ushort)(data[k] | (data[k + 1] << 8));
+                    int i = row + x;
+                    if (labels[i] == value) continue;
+                    touched.Add(labels[i]);
+                    touched.Add(value);
+                    labels[i] = value;
+                    if (value > highest) highest = value;
+                }
+            }
+            if (touched.Count == 0) return true;
+            touched.Remove(0);
+
+            if (highest >= Vol.Cells.Length)
+            {
+                int oldLength = Vol.Cells.Length;
+                CellInfo[] grown = Vol.Cells;
+                Array.Resize(ref grown, Mathf.Max(highest + 1, oldLength * 2));
+                for (int i = oldLength; i < grown.Length; i++) grown[i] = Empty(i);
+                Vol.Cells = grown;
+            }
+            if (highest > Vol.MaxLabel) Vol.MaxLabel = highest;
+
+            var ids = new int[touched.Count];
+            touched.CopyTo(ids);
+            foreach (int id in ids)
+            {
+                // eine zelle kann nur im alten rahmen oder im ausschnitt liegen
+                CellInfo before = Vol.Cells[id];
+                Vector3Int low = before.Exists ? Vector3Int.Min(before.Min, min) : min;
+                Vector3Int high = before.Exists ? Vector3Int.Max(before.Max, max) : max;
+                CellInfo after = CellStats.ComputeCell(Vol, id, low, high);
+                Vol.Cells[id] = after;
+                if (after.Exists != before.Exists) Vol.LabelCount += after.Exists ? 1 : -1;
+            }
+
+            UploadRegion(min, max);
+            // alte schritte zeigen auf werte die napari gerade ueberschrieben hat
+            undoStack.Clear();
+            MergeSource = 0;
+            SplitSource = 0;
+            volumeView.RefreshSplitHints(ids);
+            volumeView.NotifyLabelsChanged();
+            int selected = volumeView.SelectedLabel;
+            if (selected > 0 && (selected >= Vol.Cells.Length || !Vol.Cells[selected].Exists)) volumeView.SelectedLabel = 0;
+            SetMessage("Mask updated from napari");
+            return true;
+        }
+
         // rueckgaengig
 
         public void Undo()
@@ -418,7 +488,7 @@ namespace BioimageVR
 
         // lokal ueberschreiben, damit die korrektur beim naechsten oeffnen noch da ist
         // das original bleibt einmalig als _labels_v001 daneben liegen
-        // danach als neue version an den pc, napari holt sie mit From VR
+        // danach als neue version an den pc, napari zieht sie von selbst nach
         public void Save()
         {
             if (!Available) return;
@@ -432,8 +502,6 @@ namespace BioimageVR
             try
             {
                 nifti = EncodeNifti(Vol.Labels, Vol.SizeX, Vol.SizeY, Vol.SizeZ);
-                if (File.Exists(labelsPath) && !File.Exists(backupPath)) File.Copy(labelsPath, backupPath);
-                File.WriteAllBytes(labelsPath, nifti);
             }
             catch (Exception e)
             {
@@ -441,16 +509,43 @@ namespace BioimageVR
                 return;
             }
 
-            UnsavedChanges = 0;
-            SetMessage("Saved on the headset · sending to the PC ...");
+            // per usb kabel aufgespielte dateien darf die app nicht ueberschreiben, dann daneben
+            // als _labels_edited ablegen, VolumeView nimmt die neuere von beiden
+            string localError = null;
+            try
+            {
+                if (File.Exists(labelsPath) && !File.Exists(backupPath)) File.Copy(labelsPath, backupPath);
+                File.WriteAllBytes(labelsPath, nifti);
+            }
+            catch (Exception)
+            {
+                try
+                {
+                    File.WriteAllBytes(Path.Combine(dir, $"{stem}_labels_edited.nii.gz"), nifti);
+                }
+                catch (Exception e)
+                {
+                    localError = e.Message;
+                }
+            }
+
+            if (localError == null) UnsavedChanges = 0;
+            string here = localError == null ? "Saved on the headset" : "Not saved on the headset";
             if (vrBridge == null)
             {
-                SetMessage("Saved on the headset · no PC connected");
+                SetMessage($"{here} · no PC connected");
                 return;
             }
-            vrBridge.UploadLabels(stem, nifti, error => SetMessage(error == null
-                ? "Saved here and on the PC · get it in napari with From VR"
-                : $"Saved on the headset · PC not reachable: {error}"));
+            SetMessage($"{here} · sending to the PC ...");
+            vrBridge.UploadLabels(stem, nifti, error =>
+            {
+                if (error == null) UnsavedChanges = 0;
+                SetMessage(error == null
+                    ? (localError == null ? "Saved here and on the PC · napari updates its mask"
+                                          : "Saved on the PC only, the headset copy is write protected · napari updates its mask")
+                    : (localError == null ? $"Saved on the headset · PC not reachable: {error}"
+                                          : $"Saving failed: {localError}"));
+            });
         }
 
         // minimaler nifti-1 header, uint16, gleiches layout wie convert_labels.py

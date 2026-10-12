@@ -64,7 +64,7 @@ def metadata_path_for(volume_path: Path) -> Path | None:
 
 
 def affine_for(orientation: str, voxel: np.ndarray) -> np.ndarray:
-    """affine aus achsenrichtungen und voxelgroesse, ursprung egal"""
+    # affine aus achsenrichtungen und voxelgroesse, ursprung egal
     letters = orientation.upper()
     if len(letters) != 3 or any(c not in DIRECTIONS for c in letters):
         raise ValueError(f"Orientation '{orientation}' must be three letters out of R L A P S I, e.g. PIR.")
@@ -82,7 +82,7 @@ def is_body_scan(shape: tuple[int, ...], voxel: np.ndarray, unit: str) -> bool:
 
 
 def class_names(env: Path, task: str) -> dict[int, str]:
-    """namen der klassen stehen nur in der totalseg umgebung"""
+    # namen der klassen stehen nur in der totalseg umgebung
     code = ("import json; from totalsegmentator.map_to_binary import class_map; "
             f"print(json.dumps(class_map['{task}']))")
     out = subprocess.run([str(env / "Scripts" / "python.exe"), "-c", code], capture_output=True, text=True, check=True)
@@ -114,8 +114,8 @@ def read_voxel_size(metadata: dict) -> tuple[np.ndarray | None, str]:
 
 def segment_body(volume_path: Path, orientation: str | None = None, modality: str = "mr", fast: bool = False,
                  detail: bool = False, overwrite: bool = False) -> dict:
-    """grundmodell und auf wunsch die detailmodelle, schreibt maske und namen neben das volumen.
-    gibt zurueck was gefunden wurde, wirft ValueError mit lesbarem grund wenn es nicht geht"""
+    # grundmodell und auf wunsch die detailmodelle, schreibt maske und namen neben das volumen.
+    # gibt zurueck was gefunden wurde, wirft ValueError mit lesbarem grund wenn es nicht geht
     labels_path = labels_path_for(volume_path)
     if labels_path.exists() and not overwrite:
         raise ValueError(f"{labels_path} already exists. It may be a hand made segmentation, "

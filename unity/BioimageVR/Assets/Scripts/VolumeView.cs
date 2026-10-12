@@ -488,6 +488,10 @@ namespace BioimageVR
             string dir = Path.GetDirectoryName(volumePath) ?? "";
             string stem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(volumePath));
             string labelsPath = Path.Combine(dir, $"{stem}_labels.nii.gz");
+            // korrektur die nicht ueber die aufgespielte datei geschrieben werden durfte, siehe LabelEditor.Save
+            string editedPath = Path.Combine(dir, $"{stem}_labels_edited.nii.gz");
+            if (File.Exists(editedPath) && (!File.Exists(labelsPath)
+                || File.GetLastWriteTimeUtc(editedPath) > File.GetLastWriteTimeUtc(labelsPath))) labelsPath = editedPath;
             if (!File.Exists(labelsPath)) return null;
 
             try

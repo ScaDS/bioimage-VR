@@ -1,21 +1,20 @@
-"""flugweg durch einen hohlraum im volumen, z.b. nase bis luftroehre.
-
-alles unter dem threshold ist luft, pro luftvoxel der abstand zur naechsten wand
-der weg ist der guenstigste von start nach ziel, nah an der wand ist teuer, dadurch
-bleibt er mittig im gang. allgemein fuer jedes bild mit hohlraeumen, nichts koerperspezifisches
-
-start und ziel in voxeln (x,y,z) wie in der nifti datei, sie rasten auf die
-freieste luftstelle in der naehe ein, grob geschaetzt reicht also
-
-stationen kommen aus der form des wegs, ohne anatomie wissen: eingang aus der freien luft,
-engstellen und scharfe kurven. namen dafuer kann spaeter ein modell oder das vlm vergeben
-
-ausgabe <volumen stem>_flypath.json neben dem volumen, dazu ein kontrollbild
-
-usage:
-    python find_fly_path.py volume.nii.gz --start 8,225,119 --end 150,312,124
-    python find_fly_path.py volume.nii.gz --start 8,225,119 --end 150,312,124 --threshold 0.12
-"""
+# flugweg durch einen hohlraum im volumen, z.b. nase bis luftroehre.
+#
+# alles unter dem threshold ist luft, pro luftvoxel der abstand zur naechsten wand
+# der weg ist der guenstigste von start nach ziel, nah an der wand ist teuer, dadurch
+# bleibt er mittig im gang. allgemein fuer jedes bild mit hohlraeumen, nichts koerperspezifisches
+#
+# start und ziel in voxeln (x,y,z) wie in der nifti datei, sie rasten auf die
+# freieste luftstelle in der naehe ein, grob geschaetzt reicht also
+#
+# stationen kommen aus der form des wegs, ohne anatomie wissen: eingang aus der freien luft,
+# engstellen und scharfe kurven. namen dafuer kann spaeter ein modell oder das vlm vergeben
+#
+# ausgabe <volumen stem>_flypath.json neben dem volumen, dazu ein kontrollbild
+#
+# usage:
+# python find_fly_path.py volume.nii.gz --start 8,225,119 --end 150,312,124
+# python find_fly_path.py volume.nii.gz --start 8,225,119 --end 150,312,124 --threshold 0.12
 
 from __future__ import annotations
 
@@ -45,7 +44,7 @@ OUTSIDE_VOXELS = 30.0
 
 
 def load_volume(path: Path) -> tuple[np.ndarray, np.ndarray, str]:
-    """graustufen 0..1 als (x,y,z), voxelgroesse und einheit aus dem metadata.json daneben"""
+    # graustufen 0..1 als (x,y,z), voxelgroesse und einheit aus dem metadata.json daneben
     data = np.asanyarray(nib.load(str(path)).dataobj)
     if data.ndim == 4:
         data = data.max(axis=3)
@@ -66,14 +65,14 @@ def load_volume(path: Path) -> tuple[np.ndarray, np.ndarray, str]:
 
 
 def clearance_map(volume: np.ndarray, threshold: float, voxel: np.ndarray) -> np.ndarray:
-    """abstand zur naechsten wand in der einheit des volumens, 0 im gewebe"""
+    # abstand zur naechsten wand in der einheit des volumens, 0 im gewebe
     smooth = ndimage.gaussian_filter(volume, SMOOTH_SIGMA)
     air = smooth < threshold
     return ndimage.distance_transform_edt(air, sampling=voxel).astype(np.float32)
 
 
 def snap(point: np.ndarray, clearance: np.ndarray, radius: int = SNAP_RADIUS) -> tuple[int, int, int]:
-    """freieste luftstelle im umkreis"""
+    # freieste luftstelle im umkreis
     lo = np.maximum(point - radius, 0)
     hi = np.minimum(point + radius + 1, clearance.shape)
     box = clearance[lo[0]:hi[0], lo[1]:hi[1], lo[2]:hi[2]]
@@ -86,7 +85,7 @@ def snap(point: np.ndarray, clearance: np.ndarray, radius: int = SNAP_RADIUS) ->
 
 def find_path(clearance: np.ndarray, start: tuple[int, ...], end: tuple[int, ...],
               voxel: np.ndarray, cap: float) -> np.ndarray:
-    """guenstigster weg nur durch luft, kosten fallen mit dem wandabstand"""
+    # guenstigster weg nur durch luft, kosten fallen mit dem wandabstand
     from skimage.graph import MCP_Geometric
 
     # ab cap bringt mehr abstand nichts mehr, sonst zieht freie aussenluft den weg aus dem gang
@@ -98,7 +97,7 @@ def find_path(clearance: np.ndarray, start: tuple[int, ...], end: tuple[int, ...
 
 
 def smooth_and_resample(path: np.ndarray, spacing: float = SPACING_VOXELS) -> np.ndarray:
-    """treppenstufen vom voxelraster weg, danach gleichmaessige abstaende"""
+    # treppenstufen vom voxelraster weg, danach gleichmaessige abstaende
     if len(path) < 5:
         return path
     smooth = ndimage.gaussian_filter1d(path, sigma=3.0, axis=0, mode="nearest")
@@ -110,7 +109,7 @@ def smooth_and_resample(path: np.ndarray, spacing: float = SPACING_VOXELS) -> np
 
 
 def _distance_to_border(point: np.ndarray, direction: np.ndarray, shape: tuple[int, ...]) -> float:
-    """strecke in voxeln bis der strahl das bild verlaesst"""
+    # strecke in voxeln bis der strahl das bild verlaesst
     best = np.inf
     for axis in range(3):
         if abs(direction[axis]) < 1e-6:
@@ -121,8 +120,8 @@ def _distance_to_border(point: np.ndarray, direction: np.ndarray, shape: tuple[i
 
 
 def extend_outside(points: np.ndarray, shape: tuple[int, ...], spacing: float = SPACING_VOXELS) -> np.ndarray:
-    """ein ende nah am bildrand gerade weiterfuehren bis ausserhalb des bilds.
-    ein angeschnittener gang, z.b. die luftroehre am unteren bildrand, endet sonst mitten im koerper"""
+    # ein ende nah am bildrand gerade weiterfuehren bis ausserhalb des bilds.
+    # ein angeschnittener gang, z.b. die luftroehre am unteren bildrand, endet sonst mitten im koerper
     def tail(end: np.ndarray, before: np.ndarray) -> np.ndarray:
         direction = end - before
         length = np.linalg.norm(direction)
@@ -146,7 +145,7 @@ def inside_volume(points: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
 
 
 def sample_clearance(clearance: np.ndarray, points: np.ndarray, open_value: float) -> np.ndarray:
-    """ausserhalb des bilds gibt es keine wand, dort gilt der gang als offen"""
+    # ausserhalb des bilds gibt es keine wand, dort gilt der gang als offen
     radius = ndimage.map_coordinates(clearance, points.T, order=1, mode="nearest")
     radius[~inside_volume(points, clearance.shape)] = open_value
     return radius
@@ -154,7 +153,7 @@ def sample_clearance(clearance: np.ndarray, points: np.ndarray, open_value: floa
 
 def find_stations(points: np.ndarray, radius: np.ndarray, length: np.ndarray, voxel: np.ndarray,
                   cap: float, unit: str) -> list[dict]:
-    """auffaellige stellen entlang des wegs, rein aus der geometrie"""
+    # auffaellige stellen entlang des wegs, rein aus der geometrie
     stations: list[dict] = []
     inside = 0
     outside = len(radius)
@@ -200,7 +199,7 @@ def find_stations(points: np.ndarray, radius: np.ndarray, length: np.ndarray, vo
 
 def write_preview(volume: np.ndarray, points: np.ndarray, radius: np.ndarray, length: np.ndarray,
                   unit: str, out: Path, stations: list[dict]) -> None:
-    """weg ueber drei schnitte gelegt, dazu die gangbreite entlang des wegs"""
+    # weg ueber drei schnitte gelegt, dazu die gangbreite entlang des wegs
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt

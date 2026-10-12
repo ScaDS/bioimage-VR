@@ -68,7 +68,7 @@ def ssh(command: str, check: bool = True) -> str:
 
 
 def remote_root() -> str:
-    """pfad des workspace auf dem cluster"""
+    # pfad des workspace auf dem cluster
     root = ssh(f"ws_find {WORKSPACE}", check=False)
     if not root.startswith("/"):
         raise RuntimeError(f"No workspace '{WORKSPACE}' on {HOST}. It expires after 30 days, "
@@ -85,7 +85,7 @@ def download(remote: str, local: Path) -> None:
 
 
 def job_state(job_id: str) -> str:
-    """PENDING, RUNNING, COMPLETED, FAILED usw."""
+    # PENDING, RUNNING, COMPLETED, FAILED usw.
     state = ssh(f"squeue -h -j {job_id} -o %T", check=False)
     if state:
         return state.splitlines()[0].strip()
@@ -110,8 +110,8 @@ def wait_for(job_id: str, timeout: float = 3600, poll: float = 15, report=print)
 
 
 def volume_to_czyx(volume_path: Path) -> np.ndarray:
-    """konvertiertes volumen (x,y,z) bzw. (x,y,z,3) nach (c,z,y,x), leere kanaele fallen weg.
-    die maske passt dadurch voxelgenau auf das was die brille zeigt"""
+    # konvertiertes volumen (x,y,z) bzw. (x,y,z,3) nach (c,z,y,x), leere kanaele fallen weg.
+    # die maske passt dadurch voxelgenau auf das was die brille zeigt
     data = np.asanyarray(nib.load(str(volume_path)).dataobj)
     if data.dtype.names:
         data = np.stack([data[name] for name in data.dtype.names], axis=-1)
@@ -122,7 +122,7 @@ def volume_to_czyx(volume_path: Path) -> np.ndarray:
 
 
 def anisotropy_for(volume_path: Path) -> float | None:
-    """z voxelgroesse durch xy, None wenn die metadaten fehlen"""
+    # z voxelgroesse durch xy, None wenn die metadaten fehlen
     metadata_path = metadata_path_for(volume_path)
     if not metadata_path:
         return None
@@ -137,16 +137,16 @@ ANISOTROPY_FROM = 1.5
 
 
 def cellpose_anisotropy(volume_path: Path) -> float | None:
-    """anisotropie nur weitergeben wenn sie deutlich ist.
-    blastozyste 08.10. (z zu xy 1.39): ohne 62 von 63 kernen getroffen, mit 61, kein gewinn.
-    staerker gestauchte stapel sind noch nicht geprueft"""
+    # anisotropie nur weitergeben wenn sie deutlich ist.
+    # blastozyste 08.10. (z zu xy 1.39): ohne 62 von 63 kernen getroffen, mit 61, kein gewinn.
+    # staerker gestauchte stapel sind noch nicht geprueft
     value = anisotropy_for(volume_path)
     return value if value and value >= ANISOTROPY_FROM else None
 
 
 def segment_cells(volume_path: Path, anisotropy: float | None = None, time_limit: str = "00:30:00",
                   report=print) -> tuple[np.ndarray, dict]:
-    """volumen hochladen, Cellpose-SAM als gpu job, maske (z,y,x) und kennzahlen zurueck"""
+    # volumen hochladen, Cellpose-SAM als gpu job, maske (z,y,x) und kennzahlen zurueck
     import tifffile
 
     image = volume_to_czyx(volume_path)

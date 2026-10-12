@@ -59,7 +59,7 @@ def extent_mm(shape: tuple[int, ...], voxel: np.ndarray | None, unit: str) -> fl
 
 
 def kind_from_metadata(shape: tuple[int, ...], voxel: np.ndarray | None, unit: str) -> tuple[str | None, str]:
-    """bildart allein aus der echten groesse, None wenn die nichts hergibt"""
+    # bildart allein aus der echten groesse, None wenn die nichts hergibt
     size = extent_mm(shape, voxel, unit)
     if size is None:
         return None, "no physical size in the metadata"
@@ -71,7 +71,7 @@ def kind_from_metadata(shape: tuple[int, ...], voxel: np.ndarray | None, unit: s
 
 
 def middle_slices_png(volume_path: Path) -> bytes:
-    """drei mittlere schnitte nebeneinander, so sieht das vlm jede bildart gleich"""
+    # drei mittlere schnitte nebeneinander, so sieht das vlm jede bildart gleich
     from PIL import Image
 
     data = np.asanyarray(nib.load(str(volume_path)).dataobj)
@@ -138,7 +138,7 @@ def ask_vlm(png: bytes, facts: str) -> dict:
 
 
 def classify(volume_path: Path, metadata: dict, use_vlm: bool) -> dict:
-    """stufe 1, regel und vlm zusammenfuehren"""
+    # stufe 1, regel und vlm zusammenfuehren
     shape = nib.load(str(volume_path)).shape
     voxel, unit = read_voxel_size(metadata)
     rule_kind, rule_reason = kind_from_metadata(shape, voxel, unit)

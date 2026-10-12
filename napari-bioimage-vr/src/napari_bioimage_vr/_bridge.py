@@ -1,7 +1,6 @@
-"""logik ohne napari und qt, einzeln testbar.
-
-gegenstueck zu preprocessing/vr_bridge.py auf dem server und VrBridge.cs in der app
-"""
+# logik ohne napari und qt, einzeln testbar.
+#
+# gegenstueck zu preprocessing/vr_bridge.py auf dem server und VrBridge.cs in der app
 
 from __future__ import annotations
 
@@ -39,14 +38,14 @@ def _http() -> requests.Session:
 
 
 def _url(server: str) -> str:
-    """localhost durch 127.0.0.1 ersetzen. windows probiert sonst erst ipv6 und wartet 2 s
-    pro anfrage, der server hoert nur auf ipv4"""
+    # localhost durch 127.0.0.1 ersetzen. windows probiert sonst erst ipv6 und wartet 2 s
+    # pro anfrage, der server hoert nur auf ipv4
     return re.sub(r"//localhost(?=[:/]|$)", "//127.0.0.1", server.rstrip("/"))
 
 
 def to_czyx(array: np.ndarray, rgb: bool = False) -> np.ndarray:
-    """ein layer als (c,z,y,x). rgb kanaele liegen hinten, 2d wird zu z=1,
-    mehr als 4 achsen (z.b. zeit) auf den ersten index reduziert"""
+    # ein layer als (c,z,y,x). rgb kanaele liegen hinten, 2d wird zu z=1,
+    # mehr als 4 achsen (z.b. zeit) auf den ersten index reduziert
     array = np.asarray(array)
     if rgb:
         array = np.moveaxis(array[..., :3], -1, 0)
@@ -64,7 +63,7 @@ def to_czyx(array: np.ndarray, rgb: bool = False) -> np.ndarray:
 
 def build_bundle(channels: list[np.ndarray], labels: np.ndarray | None,
                  scale_zyx: tuple[float, float, float], channel_names: list[str]) -> bytes:
-    """npz fuer POST /vr/push, kanaele muessen dieselbe raeumliche groesse haben"""
+    # npz fuer POST /vr/push, kanaele muessen dieselbe raeumliche groesse haben
     stacked = np.concatenate([to_czyx(c) for c in channels], axis=0)[:MAX_CHANNELS]
     spatial = stacked.shape[1:]
     arrays = {
@@ -97,7 +96,7 @@ def push(server: str, bundle: bytes, name: str, denoise: bool = False) -> dict:
 
 
 def fetch_labels(server: str, name: str) -> tuple[np.ndarray, np.ndarray, int]:
-    """neueste maske als (z,y,x) in originalgroesse, dazu scale und version"""
+    # neueste maske als (z,y,x) in originalgroesse, dazu scale und version
     response = _http().get(f"{_url(server)}/vr/labels", params={"name": name}, timeout=120)
     if response.status_code != 200:
         raise RuntimeError(response.json().get("error", response.text))
@@ -106,7 +105,7 @@ def fetch_labels(server: str, name: str) -> tuple[np.ndarray, np.ndarray, int]:
 
 
 def setup_usb(server: str) -> None:
-    """server richtet adb reverse ein, danach erreicht die brille ihn uebers kabel"""
+    # server richtet adb reverse ein, danach erreicht die brille ihn uebers kabel
     response = _http().post(f"{_url(server)}/vr/usb", timeout=30)
     if response.status_code != 200:
         raise RuntimeError(response.json().get("error", response.text))
@@ -119,7 +118,7 @@ def fetch_view(server: str) -> dict:
 
 
 def headset_active(server: str) -> bool | None:
-    """zeigt die brille gerade ein bild, None wenn der server nicht antwortet"""
+    # zeigt die brille gerade ein bild, None wenn der server nicht antwortet
     try:
         return vr_is_active(fetch_view(server))
     except requests.RequestException:
@@ -127,14 +126,14 @@ def headset_active(server: str) -> bool | None:
 
 
 def can_start_server(server: str) -> bool:
-    """nur der server auf diesem rechner laesst sich von hier starten, und der hoert fest auf 8000"""
+    # nur der server auf diesem rechner laesst sich von hier starten, und der hoert fest auf 8000
     url = urlparse(_url(server))
     return url.hostname == "127.0.0.1" and (url.port or 80) == SERVER_PORT and SERVER_SCRIPT.is_file()
 
 
 def _server_pythons() -> list[str]:
-    """der server braucht fastapi und co, die liegen oft nicht in der napari umgebung.
-    erst die eigene probieren, dann das python aus dem die umgebung gebaut ist"""
+    # der server braucht fastapi und co, die liegen oft nicht in der napari umgebung.
+    # erst die eigene probieren, dann das python aus dem die umgebung gebaut ist
     base = Path(sys.base_prefix) / ("python.exe" if os.name == "nt" else "bin/python3")
     candidates = [os.environ.get("BIOIMAGE_VR_SERVER_PYTHON"), sys.executable, str(base)]
     found = []
@@ -145,8 +144,8 @@ def _server_pythons() -> list[str]:
 
 
 def start_server(server: str, wait_s: float = 90.0) -> None:
-    """upload_server.py im hintergrund starten und warten bis er antwortet.
-    laeuft ohne fenster, ausgabe in SERVER_LOG, endet mit napari"""
+    # upload_server.py im hintergrund starten und warten bis er antwortet.
+    # laeuft ohne fenster, ausgabe in SERVER_LOG, endet mit napari
     for python in _server_pythons():
         with open(SERVER_LOG, "ab") as log:
             process = subprocess.Popen(
@@ -166,7 +165,7 @@ def start_server(server: str, wait_s: float = 90.0) -> None:
 
 
 def fetch_current(server: str, name: str) -> dict:
-    """bild das die brille gerade zeigt, vom pc geholt: image (c,z,y,x), scale, evtl. labels und namen"""
+    # bild das die brille gerade zeigt, vom pc geholt: image (c,z,y,x), scale, evtl. labels und namen
     response = _http().get(f"{_url(server)}/vr/current", params={"name": name}, timeout=120)
     if response.status_code != 200:
         raise RuntimeError(response.json().get("error", response.text))
@@ -179,8 +178,8 @@ def post_napari_view(server: str, view: dict) -> None:
 
 
 def camera_to_view(view_direction, up_direction, shape_zyx, scale_zyx) -> dict:
-    """gegenstueck zu view_to_camera, richtungen der napari kamera in den volumen raum.
-    nur die richtung, abstand und groesse bleiben in der brille wie sie sind"""
+    # gegenstueck zu view_to_camera, richtungen der napari kamera in den volumen raum.
+    # nur die richtung, abstand und groesse bleiben in der brille wie sie sind
     extent = np.asarray(shape_zyx, dtype=np.float64) * np.asarray(scale_zyx, dtype=np.float64)
 
     def to_cube(direction) -> dict:
@@ -191,8 +190,42 @@ def camera_to_view(view_direction, up_direction, shape_zyx, scale_zyx) -> dict:
     return {"camForward": to_cube(view_direction), "camUp": to_cube(up_direction)}
 
 
+def post_labels_patch(server: str, name: str, origin_zyx, block: np.ndarray, shape_zyx) -> None:
+    # geaenderten ausschnitt der maske an die brille, block (z,y,x) ab origin in der maske der groesse shape
+    params = {"name": name}
+    params.update(zip("zyx", (int(v) for v in origin_zyx)))
+    params.update(zip("dhw", (int(v) for v in block.shape)))
+    params.update(zip(("sz", "sy", "sx"), (int(v) for v in shape_zyx)))
+    _http().post(f"{_url(server)}/vr/labels_patch", params=params, data=block.astype("<u2").tobytes(),
+                 headers={"Content-Type": "application/octet-stream"}, timeout=10).raise_for_status()
+
+
+def fetch_pointer(server: str, after: int, wait_s: float = 1.0) -> dict:
+    # was der controller strahl auf der leinwand getan hat, seq und events. after unter 0 liefert nur den stand
+    response = _http().get(f"{_url(server)}/vr/pointer", params={"after": after, "wait": wait_s}, timeout=wait_s + 3)
+    response.raise_for_status()
+    return response.json()
+
+
+def post_screen(server: str, jpeg: bytes) -> None:
+    _http().post(f"{_url(server)}/vr/screen", data=jpeg, headers={"Content-Type": "image/jpeg"},
+                 timeout=3).raise_for_status()
+
+
+def ray_to_cube(start, end, shape_zyx) -> dict:
+    # strahl unter dem mauszeiger aus layer koordinaten in den volumen raum, wuerfel von -0.5 bis 0.5
+    shape = np.asarray(shape_zyx, dtype=np.float64)
+
+    def to_cube(point) -> dict:
+        # napari rechnet den strahl gegen den kasten von 0 bis groesse
+        c = np.asarray(point, dtype=np.float64)[-3:] / shape - 0.5
+        return {"x": float(c[2]), "y": float(c[1]), "z": float(c[0])}
+
+    return {"rayStart": to_cube(start), "rayEnd": to_cube(end)}
+
+
 def vr_is_active(view: dict, max_age_s: float = 1.5) -> bool:
-    """die brille schickt nur solange sie getragen wird, abgesetzt schlaeft die app ein"""
+    # die brille schickt nur solange sie getragen wird, abgesetzt schlaeft die app ein
     return bool(view) and view.get("age_s") is not None and view["age_s"] <= max_age_s
 
 
@@ -212,11 +245,11 @@ def _vec(d: dict) -> np.ndarray:
 
 def view_to_camera(view: dict, shape_zyx, scale_zyx, translate_zyx,
                    canvas_px: float, fov_deg: float, object_centric: bool = False) -> CameraState:
-    """blick aus der brille auf eine napari kamera fuer denselben layer.
-
-    die app schickt alles im volumen raum, wuerfel von -0.5 bis 0.5 je achse. das ist
-    unabhaengig von zoom und drehung in vr und von einer verkleinerung beim senden.
-    uvw 0 und 1 sind die aeusseren voxelkanten, napari setzt voxel i auf i * scale"""
+    # blick aus der brille auf eine napari kamera fuer denselben layer.
+    #
+    # die app schickt alles im volumen raum, wuerfel von -0.5 bis 0.5 je achse. das ist
+    # unabhaengig von zoom und drehung in vr und von einer verkleinerung beim senden.
+    # uvw 0 und 1 sind die aeusseren voxelkanten, napari setzt voxel i auf i * scale
     shape = np.asarray(shape_zyx, dtype=np.float64)
     scale = np.asarray(scale_zyx, dtype=np.float64)
     translate = np.asarray(translate_zyx, dtype=np.float64)

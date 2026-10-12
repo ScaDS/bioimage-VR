@@ -60,10 +60,10 @@ MAX_VOXELS = 64_000_000
 
 
 def _downsample_to_budget(volume: np.ndarray, max_voxels: int = MAX_VOXELS, channel_axis: int | None = None) -> np.ndarray:
-    """volumen isotrop verkleinern falls die raeumlichen achsen (alle ausser channel_axis)
-    zusammen das voxel-budget sprengen wuerden. faktor wirkt gleich auf alle raeumlichen
-    achsen (isotrop, proportionen bleiben erhalten) - ein evtl. channel_axis (fuer bereits
-    kompositierte rgb-bilder bzw. rohe kanaele) bleibt unangetastet (zoom-faktor 1 dort)"""
+    # volumen isotrop verkleinern falls die raeumlichen achsen (alle ausser channel_axis)
+    # zusammen das voxel-budget sprengen wuerden. faktor wirkt gleich auf alle raeumlichen
+    # achsen (isotrop, proportionen bleiben erhalten) - ein evtl. channel_axis (fuer bereits
+    # kompositierte rgb-bilder bzw. rohe kanaele) bleibt unangetastet (zoom-faktor 1 dort)
     spatial_shape = tuple(n for axis, n in enumerate(volume.shape) if axis != channel_axis)
     spatial_voxels = int(np.prod(spatial_shape))
     if spatial_voxels <= max_voxels:
@@ -81,18 +81,18 @@ def _downsample_to_budget(volume: np.ndarray, max_voxels: int = MAX_VOXELS, chan
 
 
 def is_remote(input_path: str) -> bool:
-    """url erkennen, geht direkt an bioio ohne pfad checks"""
+    # url erkennen, geht direkt an bioio ohne pfad checks
     return "://" in input_path
 
 
 def is_zarr_folder(path: Path) -> bool:
-    """zarr v2 hat .zgroup oder .zattrs im ordner, v3 eine zarr.json"""
+    # zarr v2 hat .zgroup oder .zattrs im ordner, v3 eine zarr.json
     return path.suffix.lower() == ".zarr" or any((path / marker).exists() for marker in (".zgroup", ".zattrs", "zarr.json"))
 
 
 def load_folder(path: Path, max_voxels: int = MAX_VOXELS) -> np.ndarray:
-    """ordner mit slices laden, sortiert, zu einem array. bereits farbige slices
-    (z.b. gerenderte screenshots) bleiben rgb statt auf grau reduziert zu werden"""
+    # ordner mit slices laden, sortiert, zu einem array. bereits farbige slices
+    # (z.b. gerenderte screenshots) bleiben rgb statt auf grau reduziert zu werden
     import imageio.v3 as iio
     from natsort import natsorted
 
@@ -115,8 +115,8 @@ def load_folder(path: Path, max_voxels: int = MAX_VOXELS) -> np.ndarray:
 
 
 def load_file(path_or_url: str, denoise: bool = True, max_voxels: int = MAX_VOXELS) -> np.ndarray:
-    """einzeldatei oder url laden, bioio erkennt format selbst.
-    mehrere kanaele werden zu einem rgb volumen kompositiert (siehe _composite_channels)"""
+    # einzeldatei oder url laden, bioio erkennt format selbst.
+    # mehrere kanaele werden zu einem rgb volumen kompositiert (siehe _composite_channels)
     from bioio import BioImage
 
     img = BioImage(path_or_url)
@@ -124,10 +124,10 @@ def load_file(path_or_url: str, denoise: bool = True, max_voxels: int = MAX_VOXE
 
 
 def _extract_czyx(data: np.ndarray, max_voxels: int = MAX_VOXELS) -> np.ndarray:
-    """5d tczyx array auf zeitpunkt 0 reduzieren, kanaele bleiben erhalten. downsamplet
-    danach falls das voxel-budget ueberschritten waere (siehe _downsample_to_budget) -
-    hier statt spaeter, damit entrauschen/kontrast-strecken nicht auf der vollen groesse
-    laufen muss"""
+    # 5d tczyx array auf zeitpunkt 0 reduzieren, kanaele bleiben erhalten. downsamplet
+    # danach falls das voxel-budget ueberschritten waere (siehe _downsample_to_budget) -
+    # hier statt spaeter, damit entrauschen/kontrast-strecken nicht auf der vollen groesse
+    # laufen muss
     if data.ndim != 5:
         raise ValueError(f"Expected a 5D TCZYX array from bioio, got shape {data.shape}")
     volume = data[0]  # erster zeitpunkt, alle kanaele
@@ -137,11 +137,11 @@ def _extract_czyx(data: np.ndarray, max_voxels: int = MAX_VOXELS) -> np.ndarray:
 
 
 def _composite_channels(volume_czyx: np.ndarray, denoise: bool = True) -> np.ndarray:
-    """einzelkanal bleibt graustufen (z,y,x), unveraendert (aber ggf. entrauscht).
-    mehrere kanaele werden je einzeln entrauscht und 0..255 normalisiert, OHNE farbe
-    zu verrechnen - landen roh (ein kanal pro r/g/b) im ergebnis, damit die unity-app
-    sie live faerben/mischen und einzeln an-ausschalten kann (siehe LIVE_CHANNELS_MARKER).
-    kappt bei mehr als 3 kanaelen mit warnung auf die ersten drei"""
+    # einzelkanal bleibt graustufen (z,y,x), unveraendert (aber ggf. entrauscht).
+    # mehrere kanaele werden je einzeln entrauscht und 0..255 normalisiert, OHNE farbe
+    # zu verrechnen - landen roh (ein kanal pro r/g/b) im ergebnis, damit die unity-app
+    # sie live faerben/mischen und einzeln an-ausschalten kann (siehe LIVE_CHANNELS_MARKER).
+    # kappt bei mehr als 3 kanaelen mit warnung auf die ersten drei
     channel_count = volume_czyx.shape[0]
     if channel_count == 1:
         # unveraendert zurueck, normalize_to_uint8 in convert() entrauscht/streckt diesen
@@ -165,7 +165,7 @@ def _composite_channels(volume_czyx: np.ndarray, denoise: bool = True) -> np.nda
 
 
 def _drop_alpha(slice_: np.ndarray) -> np.ndarray:
-    """alphakanal verwerfen falls vorhanden, graustufen/rgb sonst unveraendert lassen"""
+    # alphakanal verwerfen falls vorhanden, graustufen/rgb sonst unveraendert lassen
     if slice_.ndim == 2:
         return slice_
     if slice_.ndim == 3 and slice_.shape[-1] in (3, 4):
@@ -174,8 +174,8 @@ def _drop_alpha(slice_: np.ndarray) -> np.ndarray:
 
 
 def normalize_to_uint8(volume: np.ndarray, denoise: bool = True) -> np.ndarray:
-    """werte per perzentil-kontrast auf uint8 skalieren, siehe _percentile_range.
-    entrauscht vorher per default (siehe _denoise)"""
+    # werte per perzentil-kontrast auf uint8 skalieren, siehe _percentile_range.
+    # entrauscht vorher per default (siehe _denoise)
     volume = volume.astype(np.float32)
     if denoise:
         volume = _denoise(volume)
@@ -187,17 +187,17 @@ def normalize_to_uint8(volume: np.ndarray, denoise: bool = True) -> np.ndarray:
 
 
 def _to_nifti_image(volume: np.ndarray, live_channels: bool = False) -> nib.Nifti1Image:
-    """volume kommt als (z,y,x) bzw (z,y,x,3) rein (bioio/slice-stapel-reihenfolge).
-    nibabel uebernimmt array-achse 0/1/2 direkt als nifti dim[1]/[2]/[3] (x/y/z) -
-    ohne transpose wuerden wir also z als x und x als z ausgeben (gefunden 22.09.,
-    beleg: nifti dim vs. metadata.json size vertauscht). erst hier auf echtes (x,y,z)
-    drehen, ab dann passt "nifti layout passt zu texture3d" (NiftiVolumeLoader.cs)
-    tatsaechlich.
-    graustufen (x,y,z) direkt, rgb (x,y,z,3) als nifti rgb24 (datatype 128) -
-    standardkonform, jedes 'voxel' 3 interleaved bytes r,g,b statt eine extra dimension.
-    live_channels setzt LIVE_CHANNELS_MARKER im descrip-header-feld (80 byte freitext,
-    fuer genau sowas gedacht) - unterscheidet "r,g,b sind drei rohe kanaele" von
-    "r,g,b ist schon eine fertige farbe" (z.b. bereits farbige slice-bilder)"""
+    # volume kommt als (z,y,x) bzw (z,y,x,3) rein (bioio/slice-stapel-reihenfolge).
+    # nibabel uebernimmt array-achse 0/1/2 direkt als nifti dim[1]/[2]/[3] (x/y/z) -
+    # ohne transpose wuerden wir also z als x und x als z ausgeben (gefunden 22.09.,
+    # beleg: nifti dim vs. metadata.json size vertauscht). erst hier auf echtes (x,y,z)
+    # drehen, ab dann passt "nifti layout passt zu texture3d" (NiftiVolumeLoader.cs)
+    # tatsaechlich.
+    # graustufen (x,y,z) direkt, rgb (x,y,z,3) als nifti rgb24 (datatype 128) -
+    # standardkonform, jedes 'voxel' 3 interleaved bytes r,g,b statt eine extra dimension.
+    # live_channels setzt LIVE_CHANNELS_MARKER im descrip-header-feld (80 byte freitext,
+    # fuer genau sowas gedacht) - unterscheidet "r,g,b sind drei rohe kanaele" von
+    # "r,g,b ist schon eine fertige farbe" (z.b. bereits farbige slice-bilder)
     if volume.ndim == 4:
         volume = volume.transpose(2, 1, 0, 3)  # (z,y,x,3) -> (x,y,z,3)
         packed = np.zeros(volume.shape[:3], dtype=[("R", "u1"), ("G", "u1"), ("B", "u1")])
@@ -240,10 +240,10 @@ def convert(input_path: str, output_path: Path, denoise: bool = True, max_voxels
 
 def convert_array(volume_czyx: np.ndarray, output_path: Path, denoise: bool = False,
                   max_voxels: int = MAX_VOXELS) -> np.ndarray:
-    """schon geladenes (c,z,y,x) array statt datei, z.b. layer aus napari (siehe
-    upload_server /vr/push). gleiche kette wie convert(): budget, kanaele, strecken.
-    entrauschen hier standardmaessig aus, napari daten sind meist schon aufbereitet.
-    gibt das geschriebene volumen als (z,y,x) bzw (z,y,x,3) zurueck"""
+    # schon geladenes (c,z,y,x) array statt datei, z.b. layer aus napari (siehe
+    # upload_server /vr/push). gleiche kette wie convert(): budget, kanaele, strecken.
+    # entrauschen hier standardmaessig aus, napari daten sind meist schon aufbereitet.
+    # gibt das geschriebene volumen als (z,y,x) bzw (z,y,x,3) zurueck
     if volume_czyx.ndim != 4:
         raise ValueError(f"Expected a (c,z,y,x) array, got shape {volume_czyx.shape}")
     volume = _downsample_to_budget(volume_czyx, max_voxels, channel_axis=0)
@@ -263,8 +263,8 @@ UNIT_TO_UM = {"nm": 0.001, "um": 1.0, "µm": 1.0, "micron": 1.0, "mm": 1000.0, "
 
 
 def read_tiff_spacing(path: str) -> tuple[list[float], str, tuple[int, ...]] | None:
-    """voxelgroesse (z,y,x), einheit und form aus einem imagej tiff, sonst None.
-    z steht in imagej 'spacing', x und y als pixel pro einheit in XResolution und YResolution"""
+    # voxelgroesse (z,y,x), einheit und form aus einem imagej tiff, sonst None.
+    # z steht in imagej 'spacing', x und y als pixel pro einheit in XResolution und YResolution
     if is_remote(path) or Path(path).suffix.lower() not in (".tif", ".tiff"):
         return None
     import tifffile
@@ -295,8 +295,8 @@ def read_tiff_spacing(path: str) -> tuple[list[float], str, tuple[int, ...]] | N
 
 def write_metadata(output_path: Path, voxel_zyx: list[float], unit: str, shape_zyx: tuple[int, ...],
                    channels: list[str] | None = None) -> Path:
-    """<stem>_metadata.json neben das volumen, gleiche benennung wie auf der brille.
-    voxel_size in der originaleinheit plus voxel_size_um fuer aeltere app staende"""
+    # <stem>_metadata.json neben das volumen, gleiche benennung wie auf der brille.
+    # voxel_size in der originaleinheit plus voxel_size_um fuer aeltere app staende
     stem = output_path.name.removesuffix(".gz").removesuffix(".nii")
     to_um = UNIT_TO_UM.get(unit, 1.0)
     unit = "µm" if unit in ("um", "micron") else unit

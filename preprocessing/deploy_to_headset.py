@@ -31,7 +31,7 @@ API_KEY_FILENAME = ".scadsai-api-key"
 
 
 def find_adb() -> str:
-    """adb suchen, erst path dann unity bundle"""
+    # adb suchen, erst path dann unity bundle
     on_path = shutil.which("adb")
     if on_path:
         return on_path
@@ -68,8 +68,8 @@ def check_single_device(adb: str) -> None:
 
 
 def setup_usb_reverse(adb: str, port: int = 8000) -> None:
-    """brille erreicht den server dann ueber das kabel unter http://localhost:<port>,
-    ohne gemeinsames wlan. muss nach jedem neu einstecken wieder laufen"""
+    # brille erreicht den server dann ueber das kabel unter http://localhost:<port>,
+    # ohne gemeinsames wlan. muss nach jedem neu einstecken wieder laufen
     check_single_device(adb)
     subprocess.run([adb, "reverse", f"tcp:{port}", f"tcp:{port}"], check=True, capture_output=True)
 
@@ -84,7 +84,7 @@ def push_to_device(adb: str, local_path: Path, package: str, remote_name: str | 
 
 
 def ensure_api_key_pushed(adb: str, package: str) -> None:
-    """api key auch pushen, sonst schlaegt chat und voice auf dem geraet fehl"""
+    # api key auch pushen, sonst schlaegt chat und voice auf dem geraet fehl
     remote_dir = f"/sdcard/Android/data/{package}/files"
     remote_path = f"{remote_dir}/{API_KEY_FILENAME}"
 

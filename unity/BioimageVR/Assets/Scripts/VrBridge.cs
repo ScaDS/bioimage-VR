@@ -47,13 +47,29 @@ namespace BioimageVR
             public bool labelsShown;
             // welche ansicht aus napari schon uebernommen ist, siehe ApplyNapariView
             public long napariSeq;
+            // bildschirm modus ist an, napari soll sein fenster schicken
+            public bool screenWanted;
+            // groesse des volumens, napari zoomt im selben verhaeltnis mit
+            public float volScale;
+            // gewuenschte groesse des napari fensters auf dem pc, 1 klein bis 3 gross, 0 nicht anfassen
+            // windowSeq aendert sich mit jedem knopfdruck, napari stellt nur dann um
+            public int windowSize;
+            public long windowSeq;
         }
 
         // antwort auf den view post, napari schickt richtungen im selben volumen raum zurueck
-        [Serializable] private class ViewResponse { public NapariView napari; }
+        [Serializable] private class ViewResponse
+        {
+            public NapariView napari;
+            // fuer dieses bild liegen in napari gemalte ausschnitte der maske bis zu dieser nummer bereit
+            public string patchName;
+            public long patchSeq;
+        }
         [Serializable] private class NapariView
         {
             public long seq;
+            // steigt nur wenn sich die blickrichtung aendert, nicht beim mauszeiger allein
+            public long camSeq;
             public Vector3 camForward;
             public Vector3 camUp;
             // unter 0 heisst auswahl nicht anfassen
@@ -61,9 +77,19 @@ namespace BioimageVR
             // alle zoom schritte in napari seit zoomId aufmultipliziert, 0 heisst groesse nicht anfassen
             public float zoom;
             public long zoomId;
+            // mauszeiger in napari als strahl durchs volumen, anfang und ende im volumen raum
+            public bool ray;
+            public Vector3 rayStart;
+            public Vector3 rayEnd;
         }
 
         private long appliedNapariSeq;
+        private long appliedCamSeq;
+        // in napari gemalte ausschnitte der maske, welche schon eingesetzt sind
+        private long appliedPatchSeq;
+        // frisch geladenes bild faengt beim stand des servers an, aeltere ausschnitte gehoeren nicht dazu
+        private bool patchBaseline = true;
+        private bool patchBusy;
         // zieldrehung aus napari, wird weich angefahren statt gesprungen
         private Quaternion napariTarget;
         private bool hasNapariTarget;
@@ -73,6 +99,18 @@ namespace BioimageVR
         private float lastNapariZoom;
         // faktor der noch aussteht, wird wie die drehung weich angefahren
         private float napariZoomLeft = 1f;
+
+        // linie fuer den mauszeiger aus napari, verschwindet wenn die maus eine weile ruht
+        private const float MouseRaySeconds = 4f;
+        private const float MouseRayWidth = 0.003f;
+        // die linie beginnt so weit vor dem kopf, wie bei einem controller in der hand
+        private const float MouseRayHeadGap = 0.3f;
+        private LineRenderer mouseRay;
+        private Vector3 rayStartLocal, rayEndLocal;
+        private float rayUntil;
+
+        public ScreenMirror Mirror { get; private set; }
+        public string ServerUrl => BaseUrl;
 
         private const string UsbUrl = "http://localhost:8000";
 
@@ -88,6 +126,70 @@ namespace BioimageVR
         }
 
         private string BaseUrl => connected ? Candidate(activeCandidate) : null;
+
+        private void Awake()
+        {
+            Mirror = gameObject.AddComponent<ScreenMirror>();
+            Mirror.Init(this, volumeView.transform);
+            volumeView.OnVolumeLoaded += _ => patchBaseline = true;
+        }
+
+        // im bildschirm modus zaehlt der feste standpunkt statt des kopfs, siehe ScreenMirror.ViewPoint
+        private Vector3 ViewerPosition(Camera cam) =>
+            Mirror != null && Mirror.Active ? Mirror.ViewPoint : cam.transform.position;
+
+        private string VolumeName()
+        {
+            string path = volumeView.VolumeFilePath ?? "";
+            return Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(path));
+        }
+
+        private void CheckPatches(ViewResponse response)
+        {
+            string name = VolumeName();
+            if (response == null || string.IsNullOrEmpty(name) || response.patchName != name)
+            {
+                // fuer dieses bild liegt nichts vor, was spaeter kommt ist neu
+                if (response != null)
+                {
+                    patchBaseline = false;
+                    appliedPatchSeq = 0;
+                }
+                return;
+            }
+            if (patchBaseline)
+            {
+                patchBaseline = false;
+                appliedPatchSeq = response.patchSeq;
+                return;
+            }
+            if (response.patchSeq > appliedPatchSeq && !patchBusy) StartCoroutine(FetchPatches(name));
+        }
+
+        // der reihe nach holen bis der server nichts mehr hat
+        private IEnumerator FetchPatches(string name)
+        {
+            patchBusy = true;
+            var editor = volumeView.GetComponent<LabelEditor>();
+            while (editor != null && VolumeName() == name && !patchBaseline)
+            {
+                string url = $"{BaseUrl}/vr/labels_patch?name={UnityWebRequest.EscapeURL(name)}&after={appliedPatchSeq}";
+                using var request = UnityWebRequest.Get(url);
+                request.timeout = 10;
+                yield return request.SendWebRequest();
+                if (request.result != UnityWebRequest.Result.Success || request.responseCode != 200) break;
+                string[] box = (request.GetResponseHeader("X-Box") ?? "").Split(',');
+                if (!long.TryParse(request.GetResponseHeader("X-Seq"), out long seq) || box.Length != 6) break;
+                var v = new int[6];
+                bool parsed = true;
+                for (int i = 0; i < 6; i++) parsed &= int.TryParse(box[i], out v[i]);
+                appliedPatchSeq = seq;
+                // bild wurde inzwischen gewechselt, dann gehoert der ausschnitt nicht mehr hierher
+                if (parsed && VolumeName() == name)
+                    editor.ApplyPatch(new Vector3Int(v[0], v[1], v[2]), new Vector3Int(v[3], v[4], v[5]), request.downloadHandler.data);
+            }
+            patchBusy = false;
+        }
 
         private void OnEnable()
         {
@@ -261,7 +363,9 @@ namespace BioimageVR
             NapariView view;
             try
             {
-                view = JsonUtility.FromJson<ViewResponse>(json)?.napari;
+                ViewResponse response = JsonUtility.FromJson<ViewResponse>(json);
+                CheckPatches(response);
+                view = response?.napari;
             }
             catch (Exception)
             {
@@ -270,6 +374,9 @@ namespace BioimageVR
             if (view == null || view.seq <= appliedNapariSeq) return;
             appliedNapariSeq = view.seq;
             if (view.selected >= 0 && volumeView.HasLabels) volumeView.SelectedLabel = view.selected;
+            rayStartLocal = view.rayStart;
+            rayEndLocal = view.rayEnd;
+            rayUntil = view.ray ? Time.time + MouseRaySeconds : 0f;
 
             // beim fliegen gehoert die lage dem flug
             var fly = volumeView.GetComponent<VolumeFly>();
@@ -282,12 +389,16 @@ namespace BioimageVR
                 napariZoomId = view.zoomId;
                 lastNapariZoom = view.zoom;
             }
+            // mauszeiger allein dreht nichts, sonst zieht jede kopfbewegung das volumen nach
+            bool turned = view.camSeq > appliedCamSeq;
+            appliedCamSeq = view.camSeq;
             if (flying)
             {
                 hasNapariTarget = false;
                 napariZoomLeft = 1f;
                 return;
             }
+            if (!turned) return;
             if (view.camForward.sqrMagnitude < 1e-6f || view.camUp.sqrMagnitude < 1e-6f) return;
 
             Transform volume = volumeView.transform;
@@ -297,7 +408,7 @@ namespace BioimageVR
             Vector3 upLocal = Vector3.Scale(view.camUp, scale);
             upLocal = (upLocal - forwardLocal * Vector3.Dot(upLocal, forwardLocal)).normalized;
 
-            Vector3 forwardWorld = volume.position - cam.transform.position;
+            Vector3 forwardWorld = volume.position - ViewerPosition(cam);
             if (forwardWorld.sqrMagnitude < 1e-6f) forwardWorld = cam.transform.forward;
             forwardWorld.Normalize();
             Vector3 upWorld = Vector3.up - forwardWorld * Vector3.Dot(Vector3.up, forwardWorld);
@@ -308,22 +419,77 @@ namespace BioimageVR
             hasNapariTarget = true;
         }
 
+        private void LateUpdate()
+        {
+            bool show = Time.time < rayUntil && volumeView.LoadedVolume != null;
+            if (!show)
+            {
+                if (mouseRay != null && mouseRay.gameObject.activeSelf) mouseRay.gameObject.SetActive(false);
+                return;
+            }
+            // eigenes root objekt in weltkoordinaten, sonst verzerrt die volumen skalierung die breite
+            if (mouseRay == null)
+            {
+                var go = new GameObject("NapariMouseRay", typeof(LineRenderer));
+                mouseRay = go.GetComponent<LineRenderer>();
+                mouseRay.useWorldSpace = true;
+                Shader shader = Shader.Find("Sprites/Default");
+                if (shader != null) mouseRay.material = new Material(shader);
+                // zum kopf hin ausblenden, die linie soll nicht vor dem gesicht anfangen
+                Color c = UITheme.TextPrimary;
+                var fade = new Gradient();
+                fade.SetKeys(new[] { new GradientColorKey(c, 0f), new GradientColorKey(c, 1f) },
+                    new[] { new GradientAlphaKey(0f, 0f), new GradientAlphaKey(0.9f, 0.3f), new GradientAlphaKey(0.9f, 1f) });
+                mouseRay.colorGradient = fade;
+                mouseRay.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                mouseRay.positionCount = 2;
+                mouseRay.widthMultiplier = MouseRayWidth;
+            }
+            if (!mouseRay.gameObject.activeSelf) mouseRay.gameObject.SetActive(true);
+            Transform volume = volumeView.transform;
+            Vector3 start = volume.TransformPoint(rayStartLocal);
+            Vector3 end = volume.TransformPoint(rayEndLocal);
+            // vom volumen rueckwaerts bis kurz vor den kopf verlaengern, wie ein strahl aus der hand
+            Camera cam = Camera.main;
+            Vector3 direction = end - start;
+            if (cam != null && direction.sqrMagnitude > 1e-8f)
+            {
+                direction.Normalize();
+                float back = Vector3.Dot(cam.transform.position - start, direction) + MouseRayHeadGap;
+                if (back < 0f) start += direction * back;
+            }
+            mouseRay.SetPosition(0, start);
+            mouseRay.SetPosition(1, end);
+        }
+
         private ViewState CurrentView(Camera cam)
         {
             Transform volume = volumeView.transform;
-            string path = volumeView.VolumeFilePath ?? "";
+            bool screen = Mirror != null && Mirror.Active;
+            Vector3 eye = ViewerPosition(cam);
+            Vector3 forward = cam.transform.forward;
+            Vector3 up = cam.transform.up;
+            if (screen && (volume.position - eye).sqrMagnitude > 1e-6f)
+            {
+                forward = (volume.position - eye).normalized;
+                up = Vector3.up;
+            }
             // richtungen mit InverseTransformVector, damit die achsen skalierung
             // wie bei den positionen mit rausgerechnet wird
             return new ViewState
             {
-                name = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(path)),
-                camPos = volume.InverseTransformPoint(cam.transform.position),
-                camForward = volume.InverseTransformVector(cam.transform.forward).normalized,
-                camUp = volume.InverseTransformVector(cam.transform.up).normalized,
+                name = VolumeName(),
+                camPos = volume.InverseTransformPoint(eye),
+                camForward = volume.InverseTransformVector(forward).normalized,
+                camUp = volume.InverseTransformVector(up).normalized,
+                volScale = volume.localScale.magnitude,
                 hover = volumeView.HoverLabel,
                 selected = volumeView.SelectedLabel,
                 labelsShown = volumeView.ShowLabels,
                 napariSeq = appliedNapariSeq,
+                screenWanted = Mirror != null && Mirror.Active,
+                windowSize = Mirror != null ? Mirror.WindowSize : 0,
+                windowSeq = Mirror != null ? Mirror.WindowSeq : 0,
             };
         }
     }

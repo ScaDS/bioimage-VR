@@ -1,11 +1,10 @@
-"""live video aus der brille, variante A.
-
-die quest gibt ihr display per adb screenrecord als h264 strom aus, hier dekodiert.
-braucht usb kabel (oder adb ueber wlan), die app auf der brille muss nichts tun.
-das display liefert beide augen nebeneinander, 4128x2208 auf der quest 3, wir schneiden aus.
-schwarz solange die brille nicht getragen wird, dann gibt die quest kein bild aus.
-bei stehendem bild schickt die quest kaum neue frames, die rate steigt sobald sich was bewegt
-"""
+# live video aus der brille, variante A.
+#
+# die quest gibt ihr display per adb screenrecord als h264 strom aus, hier dekodiert.
+# braucht usb kabel (oder adb ueber wlan), die app auf der brille muss nichts tun.
+# das display liefert beide augen nebeneinander, 4128x2208 auf der quest 3, wir schneiden aus.
+# schwarz solange die brille nicht getragen wird, dann gibt die quest kein bild aus.
+# bei stehendem bild schickt die quest kaum neue frames, die rate steigt sobald sich was bewegt
 
 from __future__ import annotations
 
@@ -30,7 +29,7 @@ MAX_FPS = 30
 
 
 def find_adb() -> str:
-    """adb suchen, erst path dann unity bundle, gleiche logik wie deploy_to_headset.py"""
+    # adb suchen, erst path dann unity bundle, gleiche logik wie deploy_to_headset.py
     on_path = shutil.which("adb")
     if on_path:
         return on_path
@@ -42,7 +41,7 @@ def find_adb() -> str:
 
 
 def crop_eye(frame: np.ndarray, eye: str) -> np.ndarray:
-    """links, rechts oder beide augen"""
+    # links, rechts oder beide augen
     if eye == "beide":
         return frame
     half = frame.shape[1] // 2
@@ -50,12 +49,12 @@ def crop_eye(frame: np.ndarray, eye: str) -> np.ndarray:
 
 
 class Flattener:
-    """macht aus einem linsenverzerrten augenbild ein flaches bild.
-
-    das display bekommt die bilder so vorverzerrt, dass sie durch die linse gerade wirken.
-    hier radial zurueckgerechnet, r_quelle = r * (1 + strength * r^2) / zoom, r normiert
-    auf die halbe bildbreite. genaues linsenmodell der quest ist nicht bekannt, deshalb
-    regler im plugin statt fester werte. tabellen werden nur bei neuer groesse neu gebaut"""
+    # macht aus einem linsenverzerrten augenbild ein flaches bild.
+    #
+    # das display bekommt die bilder so vorverzerrt, dass sie durch die linse gerade wirken.
+    # hier radial zurueckgerechnet, r_quelle = r * (1 + strength * r^2) / zoom, r normiert
+    # auf die halbe bildbreite. genaues linsenmodell der quest ist nicht bekannt, deshalb
+    # regler im plugin statt fester werte. tabellen werden nur bei neuer groesse neu gebaut
 
     def __init__(self, strength: float = 0.25, zoom: float = 1.3, center_x: float = 0.0,
                  rotation_deg: float = 10.0):
@@ -69,8 +68,8 @@ class Flattener:
         self._right: Flattener | None = None
 
     def right(self) -> "Flattener":
-        """fuers rechte auge, linsen sitzen spiegelbildlich zur nase. einmal gebaut und
-        gemerkt, sonst waeren die tabellen bei jedem bild neu zu rechnen"""
+        # fuers rechte auge, linsen sitzen spiegelbildlich zur nase. einmal gebaut und
+        # gemerkt, sonst waeren die tabellen bei jedem bild neu zu rechnen
         if self._right is None:
             self._right = Flattener(self.strength, self.zoom, -self.center_x, -self.rotation_deg)
         return self._right
@@ -107,8 +106,8 @@ class Flattener:
 
 
 def flatten_eyes(frame: np.ndarray, eye: str, flattener: Flattener) -> np.ndarray:
-    """bei beiden augen jedes fuer sich entzerren, sonst waere die mitte die naht.
-    rechtes auge gespiegelt, siehe Flattener.right"""
+    # bei beiden augen jedes fuer sich entzerren, sonst waere die mitte die naht.
+    # rechtes auge gespiegelt, siehe Flattener.right
     if eye == "links":
         return flattener.apply(frame)
     if eye == "rechts":
@@ -124,11 +123,11 @@ def explain_error(message: str) -> str:
 
 
 class VideoStream:
-    """screenrecord auf der brille, dekodiert zu rgb bildern.
-
-    frames() ist ein generator fuer einen hintergrund thread, stop() kommt vom ui thread
-    und beendet sofort, auch wenn gerade kein bild kommt (stehendes oder schwarzes bild).
-    fehler kommen als str statt exception, napari verwirft exceptions aus workern sonst teils"""
+    # screenrecord auf der brille, dekodiert zu rgb bildern.
+    #
+    # frames() ist ein generator fuer einen hintergrund thread, stop() kommt vom ui thread
+    # und beendet sofort, auch wenn gerade kein bild kommt (stehendes oder schwarzes bild).
+    # fehler kommen als str statt exception, napari verwirft exceptions aus workern sonst teils
 
     def __init__(self, eye: str = "links", adb: str | None = None):
         self.eye = eye

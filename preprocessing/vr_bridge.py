@@ -1,30 +1,36 @@
-"""bruecke napari und brille, laeuft im upload_server mit (app.include_router).
-
-napari plugin schickt bild plus maske, der server konvertiert ins app format und
-merkt sich das als "offen auf der brille". die brille fragt regelmaessig nach und
-laedt neues selbst. umgekehrt schickt die brille ihre blickrichtung, napari spiegelt sie,
-und korrigierte masken landen hier als neue version fuer "From VR".
-
-ablage: data/napari/<name>/
-    <name>.nii.gz            volumen im app format
-    <name>_labels.nii.gz     maske wie sie an die brille ging
-    <name>_labels_v002.nii.gz  spaetere versionen, z.b. korrekturen aus der brille
-    metadata.json            voxelgroesse fuer VolumeView, gleiches schema wie idr
-    bridge.json              originalgroesse fuer den weg zurueck nach napari
-
-endpunkte:
-    POST /vr/push        napari schickt npz (image, labels, scale)
-    GET  /vr/pending     brille fragt nach neuem
-    GET  /vr/file        brille laedt volumen, labels, metadata
-    POST /vr/view        brille schickt blick und auswahl, ein paar mal pro sekunde
-    GET  /vr/view        napari holt den letzten blick
-    GET  /vr/labels      napari holt die neueste maske, originalgroesse (z,y,x)
-    POST /vr/labels      neue masken version, z.b. aus der brille (stufe 3)
-    POST /vr/usb         weiterleitung ueber usb kabel einrichten (adb reverse)
-    GET  /vr/current     napari holt das bild das die brille gerade zeigt, samt maske und namen
-    POST /vr/napari_view napari schickt seine ansicht, die brille uebernimmt sie beim naechsten
-                         /vr/view. so kann man zwischen brille und bildschirm wechseln
-"""
+# bruecke napari und brille, laeuft im upload_server mit (app.include_router).
+#
+# napari plugin schickt bild plus maske, der server konvertiert ins app format und
+# merkt sich das als "offen auf der brille". die brille fragt regelmaessig nach und
+# laedt neues selbst. umgekehrt schickt die brille ihre blickrichtung, napari spiegelt sie,
+# und korrigierte masken landen hier als neue version fuer "From VR".
+#
+# ablage: data/napari/<name>/
+# <name>.nii.gz            volumen im app format
+# <name>_labels.nii.gz     maske wie sie an die brille ging
+# <name>_labels_v002.nii.gz  spaetere versionen, z.b. korrekturen aus der brille
+# metadata.json            voxelgroesse fuer VolumeView, gleiches schema wie idr
+# bridge.json              originalgroesse fuer den weg zurueck nach napari
+#
+# endpunkte:
+# POST /vr/push        napari schickt npz (image, labels, scale)
+# GET  /vr/pending     brille fragt nach neuem
+# GET  /vr/file        brille laedt volumen, labels, metadata
+# POST /vr/view        brille schickt blick und auswahl, ein paar mal pro sekunde
+# GET  /vr/view        napari holt den letzten blick
+# GET  /vr/labels      napari holt die neueste maske, originalgroesse (z,y,x)
+# POST /vr/labels      neue masken version, z.b. aus der brille (stufe 3)
+# POST /vr/usb         weiterleitung ueber usb kabel einrichten (adb reverse)
+# GET  /vr/current     napari holt das bild das die brille gerade zeigt, samt maske und namen
+# POST /vr/napari_view napari schickt seine ansicht, die brille uebernimmt sie beim naechsten
+# /vr/view. so kann man zwischen brille und bildschirm wechseln
+# POST /vr/pointer     brille schickt was der controller strahl auf der leinwand tut, als maus fuer napari
+# GET  /vr/pointer     napari holt diese ereignisse der reihe nach, wartet mit wait kurz auf neue
+# POST /vr/labels_patch  napari schickt einen geaenderten ausschnitt der maske, z.b. einen pinselstrich
+# GET  /vr/labels_patch  brille holt die ausschnitte der reihe nach und setzt sie in ihre maske ein
+# POST /vr/screen      napari schickt sein fenster als jpeg, fuer den bildschirm modus der brille
+# GET  /vr/screen      brille holt das neueste fensterbild, wartet mit wait kurz auf ein neues,
+# 204 wenn keins kommt
 
 from __future__ import annotations
 
@@ -56,10 +62,25 @@ _pending = {"seq": 0, "name": None}
 _view: dict = {}
 # ansicht aus napari, seq steigt mit jeder aenderung, die brille meldet zurueck welche sie hat
 _napari_view: dict = {"seq": 0}
+# geaenderte ausschnitte der maske aus napari fuer ein bild, die brille holt sie der reihe nach.
+# nur im speicher, dauerhaft wird es erst mit To VR oder Save in der brille
+_patches: dict = {"name": None, "seq": 0, "items": []}
+PATCH_KEEP_BYTES = 256 * 1024 * 1024
+# zuletzt aus der brille gespeicherte maske, napari holt sie dann von selbst
+_labels_saved: dict = {"name": None, "version": 0}
+# fenster von napari als jpeg, nur das neueste
+_screen: dict = {"seq": 0, "jpeg": b""}
+_screen_changed = threading.Condition(_lock)
+# controller strahl auf der leinwand als maus ereignisse fuer napari, jedes hat eine laufende nummer
+_pointer: dict = {"seq": 0, "items": []}
+_pointer_changed = threading.Condition(_lock)
+POINTER_KEEP = 500
+# laenger haelt eine wartende anfrage der brille keinen server thread fest
+SCREEN_WAIT_MAX_S = 2.0
 
 
 def _safe_name(raw: str) -> str:
-    """name kommt vom client, darf nicht aus NAPARI_ROOT herausfuehren"""
+    # name kommt vom client, darf nicht aus NAPARI_ROOT herausfuehren
     cleaned = re.sub(r"[^\w-]", "_", Path(raw or "").name).strip("_")
     return cleaned[:60] or "napari"
 
@@ -69,7 +90,7 @@ def _dir_for(name: str) -> Path:
 
 
 def _latest_labels(name: str) -> tuple[Path | None, int]:
-    """neueste masken version, v1 ist die urspruenglich gesendete"""
+    # neueste masken version, v1 ist die urspruenglich gesendete
     folder = _dir_for(name)
     versions = []
     for path in folder.glob(f"{name}_labels_v*.nii.gz"):
@@ -84,7 +105,7 @@ def _latest_labels(name: str) -> tuple[Path | None, int]:
 
 
 def as_czyx(image: np.ndarray) -> np.ndarray:
-    """(z,y,x) oder (c,z,y,x), einzelne 2d schicht wird zu z=1"""
+    # (z,y,x) oder (c,z,y,x), einzelne 2d schicht wird zu z=1
     if image.ndim == 2:
         image = image[None]
     if image.ndim == 3:
@@ -161,7 +182,7 @@ def push(bundle: UploadFile = File(...), name: str = Form("napari"), denoise: bo
 
 
 def setup_usb(port: int = 8000) -> str | None:
-    """adb reverse fuer eine per usb verbundene brille, gibt None bei erfolg sonst den grund"""
+    # adb reverse fuer eine per usb verbundene brille, gibt None bei erfolg sonst den grund
     try:
         setup_usb_reverse(find_adb(), port)
         return None
@@ -216,10 +237,84 @@ async def post_view(request: Request) -> JSONResponse:
         napari_view = dict(_napari_view)
         # blick der brille verwerfen solange sie die neueste napari ansicht nicht uebernommen
         # hat, sonst springt napari kurz auf den alten stand zurueck
-        if int(view.get("napariSeq") or 0) >= napari_view["seq"]:
+        if int(view.get("napariSeq") or 0) >= napari_view.get("camSeq", 0):
             _view.clear()
             _view.update(view)
-    return JSONResponse({"ok": True, "napari": napari_view})
+        patch_name, patch_seq = _patches["name"], _patches["seq"]
+    return JSONResponse({"ok": True, "napari": napari_view, "patchName": patch_name or "", "patchSeq": patch_seq})
+
+
+def _headset_shape(name: str, napari_zyx: tuple[int, int, int]) -> tuple[int, int, int]:
+    # groesse der maske in der brille. kam das bild aus napari und wurde beim senden
+    # verkleinert, steht das in bridge.json, sonst hat napari dieselbe groesse wie die brille
+    bridge_path = _dir_for(name) / "bridge.json"
+    if bridge_path.is_file():
+        bridge = json.loads(bridge_path.read_text(encoding="utf-8"))
+        if tuple(bridge["original_shape_zyx"]) == tuple(napari_zyx):
+            return tuple(bridge["written_shape_zyx"])
+    return tuple(napari_zyx)
+
+
+def _resize_patch(block: np.ndarray, origin, napari_zyx, headset_zyx):
+    # ausschnitt auf das raster der brille umrechnen, gleiche zuordnung wie resize_labels_nearest.
+    # gibt ecke und block im raster der brille zurueck, None wenn dort kein voxel getroffen ist
+    picks, corner = [], []
+    for axis in range(3):
+        old, new = napari_zyx[axis], headset_zyx[axis]
+        targets = np.arange(new)
+        sources = np.minimum((targets * (old / new)).astype(np.int64), old - 1)
+        inside = (sources >= origin[axis]) & (sources < origin[axis] + block.shape[axis])
+        if not inside.any():
+            return None
+        corner.append(int(targets[inside][0]))
+        picks.append(sources[inside] - origin[axis])
+    return corner, block[np.ix_(*picks)]
+
+
+@router.post("/labels_patch")
+async def post_labels_patch(request: Request, name: str, z: int, y: int, x: int, d: int, h: int, w: int,
+                            sz: int, sy: int, sx: int) -> JSONResponse:
+    # ausschnitt der maske aus napari, uint16 in der reihenfolge (z,y,x), ecke z,y,x in der ganzen maske sz,sy,sx
+    safe = _safe_name(name)
+    body = await request.body()
+    if d <= 0 or h <= 0 or w <= 0 or len(body) != d * h * w * 2:
+        return JSONResponse({"error": "ausschnitt passt nicht zur angegebenen groesse"}, status_code=400)
+    block = np.frombuffer(body, dtype="<u2").reshape(d, h, w)
+    origin = [z, y, x]
+    napari_zyx = (sz, sy, sx)
+    headset_zyx = _headset_shape(safe, napari_zyx)
+    if headset_zyx != napari_zyx:
+        resized = _resize_patch(block, origin, napari_zyx, headset_zyx)
+        if resized is None:
+            return JSONResponse({"ok": True, "seq": 0})
+        origin, block = resized
+    data = np.ascontiguousarray(block).tobytes()
+    # die brille zaehlt x,y,z und legt x am schnellsten ab, das ist dieselbe byte folge
+    box = [origin[2], origin[1], origin[0], block.shape[2], block.shape[1], block.shape[0]]
+    with _lock:
+        if _patches["name"] != safe:
+            _patches["name"] = safe
+            _patches["items"] = []
+        _patches["seq"] = max(int(time.time() * 1000), _patches["seq"] + 1)
+        _patches["items"].append((_patches["seq"], box, data))
+        while len(_patches["items"]) > 1 and sum(len(item[2]) for item in _patches["items"]) > PATCH_KEEP_BYTES:
+            _patches["items"].pop(0)
+        seq = _patches["seq"]
+    return JSONResponse({"ok": True, "seq": seq})
+
+
+@router.get("/labels_patch", response_model=None)
+def get_labels_patch(name: str, after: int = 0):
+    # der aelteste ausschnitt nach after, 204 wenn die brille alle hat
+    safe = _safe_name(name)
+    with _lock:
+        items = _patches["items"] if _patches["name"] == safe else []
+        found = next((item for item in items if item[0] > after), None)
+    if found is None:
+        return Response(status_code=204)
+    seq, box, data = found
+    return Response(data, media_type="application/octet-stream",
+                    headers={"X-Seq": str(seq), "X-Box": ",".join(str(v) for v in box)})
 
 
 @router.post("/napari_view")
@@ -230,20 +325,78 @@ async def post_napari_view(request: Request) -> JSONResponse:
         return JSONResponse({"error": "kein json"}, status_code=400)
     with _lock:
         view["seq"] = int(time.time() * 1000)
+        # nur eine neue blickrichtung muss die brille erst uebernehmen, der mauszeiger allein nicht.
+        # die letzte blickrichtung bleibt dabei stehen, sonst geht sie verloren bevor die brille sie holt
+        if "camForward" in view:
+            view["camSeq"] = view["seq"]
+        else:
+            view["camSeq"] = _napari_view.get("camSeq", 0)
+            for key in ("camForward", "camUp"):
+                if key in _napari_view:
+                    view[key] = _napari_view[key]
         _napari_view.clear()
         _napari_view.update(view)
     return JSONResponse({"ok": True, "seq": view["seq"]})
 
 
+@router.post("/screen")
+async def post_screen(request: Request) -> JSONResponse:
+    jpeg = await request.body()
+    with _lock:
+        _screen["seq"] = max(int(time.time() * 1000), _screen["seq"] + 1)
+        _screen["jpeg"] = jpeg
+        _screen_changed.notify_all()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/pointer")
+async def post_pointer(request: Request) -> JSONResponse:
+    try:
+        events = (await request.json()).get("events") or []
+    except Exception:
+        return JSONResponse({"error": "kein json"}, status_code=400)
+    with _pointer_changed:
+        for event in events:
+            _pointer["seq"] += 1
+            _pointer["items"].append((_pointer["seq"], event))
+        del _pointer["items"][:-POINTER_KEEP]
+        _pointer_changed.notify_all()
+    return JSONResponse({"ok": True})
+
+
+@router.get("/pointer")
+def get_pointer(after: int = -1, wait: float = 0.0) -> JSONResponse:
+    # ereignisse nach after. unter 0 nur den stand, so faengt napari nicht mit alten klicks an
+    with _pointer_changed:
+        if after >= 0 and wait > 0:
+            _pointer_changed.wait_for(lambda: _pointer["seq"] > after, timeout=min(wait, SCREEN_WAIT_MAX_S))
+        seq = _pointer["seq"]
+        # nach einem server neustart zaehlt er von vorn, dann auch nur den stand
+        events = [event for number, event in _pointer["items"] if number > after] if 0 <= after <= seq else []
+    return JSONResponse({"seq": seq, "events": events})
+
+
+@router.get("/screen", response_model=None)
+def get_screen(after: int = 0, wait: float = 0.0):
+    with _screen_changed:
+        # warten statt die brille staendig nachfragen lassen, so kommt jedes bild sofort an
+        if wait > 0:
+            _screen_changed.wait_for(lambda: _screen["seq"] > after, timeout=min(wait, SCREEN_WAIT_MAX_S))
+        seq, jpeg = _screen["seq"], _screen["jpeg"]
+    if seq <= after or not jpeg:
+        return Response(status_code=204)
+    return Response(jpeg, media_type="image/jpeg", headers={"X-Seq": str(seq)})
+
+
 def _find_volume(name: str) -> Path | None:
-    """volumen mit diesem namen irgendwo unter data, sicherungen ausgenommen"""
+    # volumen mit diesem namen irgendwo unter data, sicherungen ausgenommen
     candidates = [p for p in DATA_ROOT.rglob(f"{name}.nii.gz") if "backup" not in str(p).lower()]
     return max(candidates, key=lambda p: p.stat().st_mtime) if candidates else None
 
 
 @router.get("/current", response_model=None)
 def current(name: str):
-    """bild, maske und namen so wie die brille sie zeigt, fuer napari als (c,z,y,x)"""
+    # bild, maske und namen so wie die brille sie zeigt, fuer napari als (c,z,y,x)
     safe = _safe_name(name)
     volume_path = _find_volume(safe)
     if volume_path is None:
@@ -275,8 +428,10 @@ def current(name: str):
 def get_view() -> JSONResponse:
     with _lock:
         view = dict(_view)
+        saved = dict(_labels_saved)
     if view:
         view["age_s"] = time.time() - view["received_at"]
+        view["labelsSaved"] = saved
     return JSONResponse(view)
 
 
@@ -302,12 +457,18 @@ def get_labels(name: str):
 
 @router.post("/labels")
 def post_labels(name: str, file: UploadFile = File(...)) -> JSONResponse:
-    """neue version als nifti im app layout, so wie die brille sie hat.
-    auch fuer bilder die nicht ueber napari kamen, dann liegt nur die maske in der ablage"""
+    # neue version als nifti im app layout, so wie die brille sie hat.
+    # auch fuer bilder die nicht ueber napari kamen, dann liegt nur die maske in der ablage
     safe = _safe_name(name)
     folder = _dir_for(safe)
     folder.mkdir(parents=True, exist_ok=True)
     _, version = _latest_labels(safe)
     path = folder / f"{safe}_labels_v{version + 1:03d}.nii.gz"
     path.write_bytes(file.file.read())
+    with _lock:
+        _labels_saved["name"] = safe
+        _labels_saved["version"] = version + 1
+        # die gespeicherte maske enthaelt alle ausschnitte schon
+        if _patches["name"] == safe:
+            _patches["items"] = []
     return JSONResponse({"name": safe, "version": version + 1})

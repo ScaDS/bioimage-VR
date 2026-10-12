@@ -24,7 +24,7 @@ namespace BioimageVR
         [Serializable] private class Metadata { public string name; public int image_id; }
 
         private static readonly System.Text.RegularExpressions.Regex LabelsFilePattern =
-            new System.Text.RegularExpressions.Regex(@"_labels(_v\d+)?\.nii\.gz$",
+            new System.Text.RegularExpressions.Regex(@"_labels(_v\d+|_edited)?\.nii\.gz$",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         public static List<Entry> Discover()

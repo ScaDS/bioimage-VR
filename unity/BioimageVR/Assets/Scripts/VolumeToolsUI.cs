@@ -40,6 +40,8 @@ namespace BioimageVR
         private static readonly float[] FlySpeeds = { 0.4f, 1f, 2.2f };
         private VolumeFly volumeFly;
         private Button labelsButton;
+        private Button screenButton;
+        private ScreenMirror screen;
         private UISegmented measureSegmented;
         private Button deleteButton, mergeButton, splitButton, undoButton, saveButton;
 
@@ -61,6 +63,9 @@ namespace BioimageVR
         private void Start()
         {
             volumeFly = volumeView.GetComponent<VolumeFly>();
+            // gehoert zur napari verbindung, ohne die gibt es den knopf nicht
+            var bridge = FindFirstObjectByType<VrBridge>();
+            screen = bridge != null ? bridge.Mirror : null;
             DisableStickNavigation();
             BuildRail();
             BuildOptions();
@@ -177,6 +182,10 @@ namespace BioimageVR
                 volumeRotate?.ResetView();
             });
             UIKit.IconButton(view, Icons.Camera, "Screenshot").onClick.AddListener(TakeScreenshot);
+            // napari fenster vom pc als leinwand, auch wenn der echte monitor nicht im blick ist
+            screenButton = UIKit.Button(view, "PC screen", UIKit.ButtonStyle.Secondary);
+            screenButton.onClick.AddListener(() => screen?.SetActive(!screen.Active));
+            screenButton.gameObject.SetActive(screen != null);
 
             // measure
             RectTransform measure = Group(bar, ToolController.Tool.Measure);
@@ -342,6 +351,11 @@ namespace BioimageVR
                     bool stops = onPath;
                     if (previousStationButton.gameObject.activeSelf != stops) previousStationButton.gameObject.SetActive(stops);
                     if (nextStationButton.gameObject.activeSelf != stops) nextStationButton.gameObject.SetActive(stops);
+                    bool screenOn = screen != null && screen.Active;
+                    // beim fliegen ist die leiste voll, an bleibt er sichtbar zum ausschalten
+                    bool screenShown = screen != null && (!flying || screenOn);
+                    if (screenButton.gameObject.activeSelf != screenShown) screenButton.gameObject.SetActive(screenShown);
+                    UIKit.SetStyle(screenButton, screenOn ? UIKit.ButtonStyle.Selected : UIKit.ButtonStyle.Secondary);
                     labelsButton.interactable = volumeView.HasLabels;
                     UIKit.SetLabel(labelsButton, !volumeView.HasLabels ? "No labels" : volumeView.ShowLabels ? "Labels on" : "Labels off");
                     if (flying && Time.time < noPathUntil)
@@ -360,6 +374,10 @@ namespace BioimageVR
                         SetHint(mode == 2
                             ? "Right stick flies where you point, sideways turns · left stick changes size · Orient lays the volume out"
                             : "Right stick flies where you point · left stick changes size · Surface shows the walls");
+                    else if (screenOn)
+                        SetHint(screen.Receiving
+                            ? "The napari window is on your left · point at it and pull the trigger to click · the buttons below it resize it"
+                            : "Waiting for napari on the PC · open Plugins > Bioimage VR there");
                     else if (mode == 2)
                         SetHint("Surface shows the first wall above the threshold · Fly takes you inside");
                     else

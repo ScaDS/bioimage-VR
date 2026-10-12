@@ -30,7 +30,7 @@ def labels_path_for(volume_path: Path) -> Path:
 
 
 def load_mask(path: Path) -> np.ndarray:
-    """maske als (z,y,x), einzelne 2d maske wird zu einer schicht"""
+    # maske als (z,y,x), einzelne 2d maske wird zu einer schicht
     import tifffile
 
     mask = np.squeeze(tifffile.imread(str(path)))
@@ -46,7 +46,7 @@ def load_mask(path: Path) -> np.ndarray:
 
 
 def match_volume_layout(mask_zyx: np.ndarray, volume_shape: tuple[int, ...]) -> np.ndarray:
-    """maske in dasselbe (nifti) achsen layout wie das volumen bringen"""
+    # maske in dasselbe (nifti) achsen layout wie das volumen bringen
     spatial = tuple(volume_shape[:3])
     xyz = mask_zyx.transpose(2, 1, 0)
     if xyz.shape == spatial:
@@ -63,8 +63,8 @@ def match_volume_layout(mask_zyx: np.ndarray, volume_shape: tuple[int, ...]) -> 
 
 
 def resize_labels_nearest(mask: np.ndarray, target_shape: tuple[int, ...]) -> np.ndarray:
-    """labels auf eine andere groesse bringen, nearest neighbor ueber indizes statt
-    interpolation, ids bleiben exakt. fuer verkleinerte volumen und den weg zurueck"""
+    # labels auf eine andere groesse bringen, nearest neighbor ueber indizes statt
+    # interpolation, ids bleiben exakt. fuer verkleinerte volumen und den weg zurueck
     if mask.shape == tuple(target_shape):
         return mask
     indices = [
@@ -75,8 +75,8 @@ def resize_labels_nearest(mask: np.ndarray, target_shape: tuple[int, ...]) -> np
 
 
 def write_labels_array(mask_zyx: np.ndarray, volume_path: Path) -> Path:
-    """schon geladene maske (z,y,x) neben das volumen schreiben, gleiche regeln wie
-    convert_labels, z.b. fuer labels layer aus napari"""
+    # schon geladene maske (z,y,x) neben das volumen schreiben, gleiche regeln wie
+    # convert_labels, z.b. fuer labels layer aus napari
     if not np.issubdtype(mask_zyx.dtype, np.integer):
         raise ValueError(f"Label mask must be integer typed, got {mask_zyx.dtype}")
     if mask_zyx.min() < 0 or mask_zyx.max() > 65535:
@@ -96,7 +96,7 @@ def write_labels_array(mask_zyx: np.ndarray, volume_path: Path) -> Path:
 
 
 def read_labels_zyx(labels_path: Path) -> np.ndarray:
-    """labels nifti zurueck nach (z,y,x), gegenstueck zu write_labels_array im neuen layout"""
+    # labels nifti zurueck nach (z,y,x), gegenstueck zu write_labels_array im neuen layout
     data = np.asanyarray(nib.load(str(labels_path)).dataobj)
     return np.ascontiguousarray(data.transpose(2, 1, 0))
 

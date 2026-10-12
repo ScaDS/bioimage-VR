@@ -1,4 +1,4 @@
-"""tests fuer _bridge ohne napari, laufen mit pytest oder direkt mit python"""
+# tests fuer _bridge ohne napari, laufen mit pytest oder direkt mit python
 
 import math
 import sys
