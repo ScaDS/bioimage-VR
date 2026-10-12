@@ -6,8 +6,7 @@ namespace BioimageVR.EditorSetup
     // gemeinsame helfer fuer die setup skripte
     public static class EditorSetupCommon
     {
-        // findet oder baut den geteilten canvas, erzwingt world space
-        // overlay taugt nicht fuer vr, alte setups hatten das noch
+        // geteilten canvas finden oder bauen, world space erzwingen
         public static Canvas FindOrCreateWorldSpaceCanvas()
         {
             Canvas canvas = Object.FindFirstObjectByType<Canvas>();
@@ -34,8 +33,7 @@ namespace BioimageVR.EditorSetup
             return canvas;
         }
 
-        // einmalige weltraum platzierung relativ zur kamera, KEIN dauerhaftes parenting
-        // greifbare panels muessen dort bleiben wo man sie hingreift, nicht dem kopf folgen
+        // einmalig relativ zur kamera platzieren, kein parenting
         public static void PlaceInFrontOfCamera(RectTransform rect, Vector3 localOffset)
         {
             var cam = Object.FindFirstObjectByType<Camera>();
@@ -52,8 +50,7 @@ namespace BioimageVR.EditorSetup
             }
         }
 
-        // gleiche formel wie SidePanelController.OnReleased zur laufzeit - nur um die
-        // hochachse drehen, sonst gilt dasselbe egal ob links, rechts oder dahinter platziert
+        // formel wie SidePanelController.OnReleased, nur um die hochachse drehen
         public static void FaceCamera(Transform rect, Vector3 cameraPosition)
         {
             Vector3 toCam = cameraPosition - rect.position;

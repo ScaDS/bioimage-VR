@@ -7,10 +7,7 @@ using UnityEngine.SceneManagement;
 
 namespace BioimageVR.EditorSetup
 {
-    // echte Touch-Controller-3D-Modelle (z.B. Touch Plus auf Quest 3), per OVRRuntimeController
-    // zur laufzeit direkt vom geraet geladen (kein gebautes mesh im projekt noetig) -
-    // braucht die Meta XR Core SDK (com.meta.xr.sdk.core, siehe Packages/manifest.json)
-    // menu: BioimageVR Setup Controller Models
+    // echte touch controller modelle ueber OVRRuntimeController, braucht meta xr core sdk
     public static class SetupControllerModels
     {
         private const string ScenePath = "Assets/Scenes/Phase1.unity";
@@ -41,8 +38,7 @@ namespace BioimageVR.EditorSetup
             new GameObject("OVRManager").AddComponent<OVRManager>();
         }
 
-        // ohne diesen schalter liefert OVRPlugin.GetRenderModelPaths() eine leere liste und
-        // OVRRuntimeController gibt nur "not supported" fehler aus, siehe dessen IsModelSupported()
+        // ohne diesen schalter liefert GetRenderModelPaths eine leere liste
         private static void EnableRenderModelSupport()
         {
             OVRProjectConfig config = OVRProjectConfig.CachedProjectConfig;
@@ -51,10 +47,7 @@ namespace BioimageVR.EditorSetup
             OVRProjectConfig.CommitProjectConfig(config);
         }
 
-        // eigenes GameObject pro hand, getrennt vom laserstrahl (SetupSidePanel.EnsureHandRay) -
-        // braucht die "grip"-pose statt der "pointer"-pose vom strahl, sonst sitzt das modell
-        // schief/verschoben (OVRRuntimeController.LoadControllerModel geht von einem
-        // grip-pose-parent aus, siehe dessen fest einprogrammierten offset)
+        // eigenes objekt pro hand mit grip pose, sonst sitzt das modell schief
         private static void EnsureControllerModel(string goName, string handTag, OVRInput.Controller controller)
         {
             var go = GameObject.Find(goName);

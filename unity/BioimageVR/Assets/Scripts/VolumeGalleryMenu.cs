@@ -8,12 +8,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // baut fuer jedes gefundene volumen eine klickbare zeile in listContainer
-    // klicken laedt es direkt in volumeView, kein umweg ueber tasten
-    // zwei quellen umschaltbar oben in der liste: auf dem geraet (VolumeLibrary.Discover) oder
-    // direkt aus dem idr katalog durchklicken (IdrClient, gleicher server wie
-    // preprocessing/upload_server.py, nur ohne adb/usb - siehe IdrClient.cs)
-    // liste kommt vom SidePanelController, der den images tab zur laufzeit baut
+    // klickbare zeile je volumen, quelle geraet oder idr katalog
     public class VolumeGalleryMenu : MonoBehaviour
     {
         [SerializeField] private VolumeView volumeView;
@@ -24,9 +19,7 @@ namespace BioimageVR
         private enum Source { Local, Idr }
         private Source source = Source.Local;
 
-        // idrLevel ist "projects"/"datasets"/"images", gleiche drei ebenen wie
-        // upload_server.py's idr_list - zurueck geht immer nur eine ebene hoch,
-        // kein eigener verlaufsstapel noetig
+        // idrLevel ist projects, datasets oder images, zurueck geht eine ebene hoch
         private string idrLevel = "projects";
         private int? idrProjectId;
         private string idrProjectName;
@@ -143,8 +136,7 @@ namespace BioimageVR
                 (items, nextOffset, hasMore, error) => OnIdrListLoaded(items, nextOffset, hasMore, error, append: false));
         }
 
-        // haengt weitere eintraege HINTEN an statt die schon gezeigten wegzuwerfen -
-        // ListLevel liefert bei jedem aufruf nur die eine angefragte seite, nicht alles bisherige
+        // weitere eintraege hinten anhaengen, ListLevel liefert nur eine seite
         private void LoadMoreIdr()
         {
             idrClient.ListLevel(idrLevel, idrProjectId, idrDatasetId, idrOffset, IdrPageSize,
@@ -178,8 +170,7 @@ namespace BioimageVR
 
             if (append)
             {
-                // die gerade geklickte "Load more" zeile entfernen, sonst bleibt sie
-                // mitten in der liste liegen statt ganz unten neu zu erscheinen
+                // geklickte Load more zeile entfernen, sonst bleibt sie mitten in der liste
                 Transform oldLoadMore = listContainer.Find("LoadMore");
                 if (oldLoadMore != null) Destroy(oldLoadMore.gameObject);
             }
@@ -196,9 +187,7 @@ namespace BioimageVR
                 return;
             }
 
-            // NICHT idrOffset += items.Count - level=images kommt serverseitig gefiltert
-            // zurueck (has_zarr+3d, siehe upload_server.py _scan_usable_images), der
-            // server sagt uns direkt wo die naechste anfrage weitermachen soll
+            // offset kommt vom server, bilder sind dort gefiltert
             idrOffset = nextOffset;
 
             if (!append && items.Count == 0)
@@ -275,8 +264,7 @@ namespace BioimageVR
             });
         }
 
-        // laedt asynchron, schlaegt einfach lautlos fehl (platzhalter bleibt stehen) -
-        // eine kaputte vorschau darf das laden des eigentlichen volumens nicht verhindern
+        // vorschau laedt asynchron und darf lautlos fehlschlagen
         private IEnumerator LoadThumbnail(RawImage target, string url)
         {
             using var request = UnityWebRequestTexture.GetTexture(url);

@@ -4,16 +4,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // vorberechneter flugweg durch einen hohlraum, z.b. nase bis luftroehre
-    // kommt aus <name>_flypath.json neben dem volumen, siehe preprocessing/find_fly_path.py
-    // faehrt wie auf einer schiene: das volumen rutscht so, dass der wegpunkt beim nutzer bleibt
-    // und dreht sich beim fahren so, dass der gang nach vorn zeigt
-    // die groesse passt sich unterwegs an, enge stellen werden so weit vergroessert dass der
-    // nutzer hineinpasst, und der kopf bleibt im freien teil des gangs: lehnt man sich zu
-    // weit zur wand, rutscht das volumen mit statt dass man im gewebe landet
-    // am ende des wegs, vorn wie hinten, fliegt man wieder hinaus: das volumen schrumpft und
-    // geht zurueck an den platz von vor dem einsteigen, man sieht es wieder ganz von aussen
-    // gesteuert von VolumeFly im modus Path, hier liegen nur weg, stationen und die fahrt
+    // vorberechneter flugweg aus <name>_flypath.json, volumen faehrt wie auf einer schiene am nutzer vorbei
     [RequireComponent(typeof(VolumeView))]
     public class FlyPath : MonoBehaviour
     {
@@ -33,8 +24,7 @@ namespace BioimageVR
         // wie schnell sich das volumen beim fahren nach dem gang ausrichtet, grad pro sekunde
         [SerializeField] private float alignSpeed = 70f;
         [SerializeField] private float lineWidth = 0.004f;
-        // tempo der automatischen fahrt zur naechsten station, meter pro sekunde im raum
-        // langsam genug um sich unterwegs umzuschauen
+        // tempo der automatischen fahrt in meter pro sekunde
         [SerializeField] private float autoSpeed = 0.18f;
 
         [Serializable] private class PointJson { public float x, y, z, radius; }
@@ -216,8 +206,7 @@ namespace BioimageVR
             return vol == null ? 0f : transform.localScale.x / (vol.SizeX * vol.VoxelSize.x);
         }
 
-        // enge stellen auf die wunschbreite vergroessern, weite stellen bleiben weit
-        // true wenn die groesse schon passt
+        // enge stellen auf die wunschbreite vergroessern, true wenn es passt
         private bool FitScale(float maxFactor)
         {
             if (zoom == null) return true;
@@ -229,9 +218,7 @@ namespace BioimageVR
             return Mathf.Abs(wanted - 1f) < 0.02f;
         }
 
-        // kopf im freien teil des gangs halten, das volumen rutscht nach
-        // weich nachziehen statt hart begrenzen: der freie radius schwankt von punkt zu punkt,
-        // an jeder kleinen wandnase ruckte sonst das ganze bild
+        // kopf im freien teil des gangs halten, weich nachziehen statt hart begrenzen
         private void KeepHeadInside(Vector3 head, float dt)
         {
             Vector3 offset = head - WorldAt(s);
@@ -250,16 +237,14 @@ namespace BioimageVR
 
         // fahrt
 
-        // einsteigen: drinnen an der naechsten stelle des wegs, von aussen am anfang des wegs
-        // kein sprung, das volumen dreht sich, kommt heran und waechst, siehe StepEntry
+        // einsteigen ohne sprung, drinnen an der naechsten stelle, von aussen am anfang
         public void Begin(Camera cam, bool cameraInside)
         {
             if (!HasPath) return;
             forward = Flat(cam.transform.forward, cam.transform.up);
             s = cameraInside ? Nearest(cam.transform.position) : 0f;
             targetWidth = comfortableWidth;
-            // weg gilt nur fuer seine schwelle. bei niedrigerer zaehlt im surface modus rauschen
-            // als wand, man fliegt in einen massiven block. fuer die fahrt umstellen, danach zurueck
+            // weg gilt nur fuer seine schwelle, fuer die fahrt umstellen und danach zurueck
             if (contrast == null) contrast = FindFirstObjectByType<VolumeContrastControl>();
             if (contrast != null && pathThreshold > 0f)
             {
@@ -326,8 +311,7 @@ namespace BioimageVR
             leavingSince = Time.time;
         }
 
-        // anflug: erst ausrichten solange das volumen noch klein ist, dann wachsen,
-        // sonst schwenkt ein riesiges volumen durch den nutzer. danach langsam zum eingang
+        // anflug: erst ausrichten solange das volumen klein ist, dann wachsen
         private void StepEntry(Vector3 head, float dt)
         {
             float angle = Vector3.Angle(TangentAt(s), forward);
@@ -406,8 +390,7 @@ namespace BioimageVR
             forward = Quaternion.AngleAxis(degrees, Vector3.up) * forward;
         }
 
-        // langsam zur naechsten oder vorigen station fahren statt zu springen
-        // nochmal druecken waehrend der fahrt nimmt die station danach
+        // langsam zur naechsten oder vorigen station, nochmal druecken nimmt die danach
         public void RideToStation(int direction)
         {
             if (!HasPath || entering || leaving) return;

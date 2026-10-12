@@ -68,22 +68,19 @@ class BioimageVRWidget(QWidget):
         self._vr_active = False
         # bildschirm modus der brille ist an, dann wird hier mit der maus gearbeitet
         self._screen_on = False
-        # zoom in napari je groesse des volumens in der brille, None bis beides einmal bekannt ist.
-        # damit zieht zoomen mit den controllern den zoom hier mit
+        # zoom in napari je groesse des volumens in der brille, None bis beides bekannt
         self._zoom_link = None
         # letzter groessenwunsch aus der brille, None bis der erste blick da ist
         self._window_seq = None
         self._last_sent = 0.0
         # blickrichtung fiel in die drosselung und muss noch nachgeschickt werden
         self._camera_pending = False
-        # neuester blick aus der brille, timer wendet nur den letzten an.
-        # jeden einzeln abarbeiten staut sich, man sieht dann nur die endstellung
+        # neuester blick aus der brille, timer wendet nur den letzten an
         self._latest_view = None
         self._applied_view = None
         # eigene kamera aenderungen von denen aus der brille unterscheiden
         self._applying = False
-        # zuletzt aus der brille gesetzte blickrichtung, napari meldet sie beim naechsten zeichnen
-        # noch einmal als eigene aenderung, das ist kein drehen mit der maus
+        # zuletzt aus der brille gesetzte blickrichtung, napari meldet sie nochmal als eigene aenderung
         self._applied_directions = None
         self._napari_leads_until = 0.0
         self._camera_connected = False
@@ -152,8 +149,7 @@ class BioimageVRWidget(QWidget):
         self.live_check.setToolTip("Geht von selbst an, sobald die Brille ein Bild zeigt. "
                                    "Von Hand ausgeschaltet bleibt es aus, bis die Brille einmal abgesetzt war.")
         self.highlight_check = QCheckBox("Nur die in VR ausgewaehlte Zelle zeigen")
-        # automatisch: getragen die brille, abgesetzt napari, drehen mit der maus uebernimmt kurz.
-        # napari steuert: arbeiten am rechner mit aufgesetzter brille
+        # automatisch: getragen die brille, abgesetzt napari, maus uebernimmt kurz
         self.lead_buttons = []
         for index, text in enumerate(["Automatisch", "Brille steuert", "napari steuert"]):
             button = QPushButton(text)
@@ -641,8 +637,7 @@ class BioimageVRWidget(QWidget):
                 self.pointer_events.emit(events)
 
     def _window_at(self, spot):
-        # fenster von napari an dieser stelle des bildschirms, offene menues und dialoge zuerst.
-        # nicht ueber QApplication.topLevelAt, das findet nichts sobald ein anderes programm davor liegt
+        # napari fenster an dieser stelle, menues zuerst, topLevelAt versagt hinter fremden fenstern
         main = self.viewer.window._qt_window
         popup = QApplication.activePopupWidget()
         others = [w for w in QApplication.topLevelWidgets()
@@ -653,11 +648,9 @@ class BioimageVRWidget(QWidget):
         return None
 
     def _inject_pointer(self, events: list) -> None:
-        # als maus ereignisse ins fenster geben, ohne die echte maus zu bewegen. der weg ueber
-        # QTest laeuft durch die ganze eingabe von qt, so gehen auch menues und auswahllisten
+        # als maus ereignisse ueber QTest ins fenster, echte maus bleibt stehen
 
-        # QTest laesst zwischendurch andere ereignisse laufen, dabei kann das naechste paket
-        # ankommen. das haengt sich hinten an statt mitten in ein ziehen zu platzen
+        # QTest laesst ereignisse laufen, neue pakete haengen sich hinten an
         self._pointer_backlog.extend(events)
         if self._pointer_busy:
             return
@@ -816,8 +809,7 @@ class BioimageVRWidget(QWidget):
         scale = tuple(float(v) for v in data["scale"])
         image = data["image"]
         labels = data.get("labels")
-        # zwei aufloesungen: napari nimmt in 3d die kleine mit jeder nten stelle je achse und in 2d
-        # die volle. die maske bleibt ganz, nur so laesst sie sich bemalen und passt zur brille
+        # bild in zwei aufloesungen, 3d klein und 2d voll, maske bleibt ganz
         step = _display_step(image.shape[1:]) if self.fast_check.isChecked() else 1
         channel_names = [str(n) for n in data.get("channel_names", [])]
         colormaps = ["gray"] if image.shape[0] == 1 else ["red", "green", "blue"]

@@ -1,11 +1,4 @@
-"""hard facts direkt aus rohen idr metadaten extrahieren, mit festen kandidaten keys -
-bewusst UNABHAENGIG von llm_chunker.py: das ist die referenz zum gegenpruefen ob die
-rag pipeline (inkl llm klassifizierung) am ende die richtige antwort liefert. wuerde
-die ground truth selbst ueber den llm klassifizierer laufen, waere der test zirkulaer
-
-nur felder mit eindeutig richtig/falsch pruefbarem wert (kein fliesstext) - siehe
-rag_eval.py fuers eigentliche durchfragen+grading
-"""
+# hard facts mit festen keys, bewusst ohne llm_chunker, sonst waere der test zirkulaer
 
 from __future__ import annotations
 
@@ -25,9 +18,7 @@ QUESTIONS = {
 
 
 def extract_hard_facts(raw: dict) -> dict[str, str]:
-    """raw = geladene metadata.json. nur felder die tatsaechlich vorhanden sind,
-    keine platzhalter - ein bild ohne Genotype feld erzeugt einfach keine
-    genotype frage statt einer unbeantwortbaren"""
+    # raw ist die geladene metadata.json, nur vorhandene felder
     key_values = raw.get("key_values") or {}
     facts = {}
 

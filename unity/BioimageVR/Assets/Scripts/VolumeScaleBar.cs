@@ -3,11 +3,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // massstabsbalken im kartenstil: feste, dezente bildschirmgroesse (haengt an der
-    // kamera, siehe SetupSidePanel.CreateScaleBar), nur die BESCHRIFTUNG aendert sich
-    // live beim zoomen - nicht die balkenlaenge selbst. (23.09.: vorherige version
-    // zeigte eine feste reale laenge und haengte am volumen, wurde dadurch beim
-    // reinzoomen riesig - das hier ist die "wie bei interaktiven karten"-variante)
+    // massstabsbalken fester bildschirmgroesse, nur die beschriftung aendert sich beim zoomen
     public class VolumeScaleBar : MonoBehaviour
     {
         [SerializeField] private Transform volumeTransform;
@@ -31,9 +27,7 @@ namespace BioimageVR
 
         private void HandleVolumeLoaded(NiftiVolumeLoader.Volume volume)
         {
-            // volume-groesse zum ladezeitpunkt merken - VolumeZoom skaliert danach
-            // relativ dazu (baseScale * scaleMultiplier), diese referenz brauchen wir
-            // um aus der AKTUELLEN skalierung auf den aktuellen zoom-faktor zurueckzurechnen
+            // groesse beim laden merken, daraus den aktuellen zoom faktor rechnen
             baseScaleAtLoad = volumeTransform.localScale;
             maxDimensionUm = Mathf.Max(volume.SizeX * volume.VoxelSize.x,
                 Mathf.Max(volume.SizeY * volume.VoxelSize.y, volume.SizeZ * volume.VoxelSize.z));

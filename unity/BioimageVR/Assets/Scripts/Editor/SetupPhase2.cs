@@ -7,8 +7,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR.EditorSetup
 {
-    // setup fuer phase 2, slice panel mit marker punkt, phase2markerdemo, volumezoom
-    // sicher erneut ausfuehrbar
+    // setup fuer phase 2, sicher erneut ausfuehrbar
     public static class SetupPhase2
     {
         private const string ScenePath = "Assets/Scenes/Phase1.unity";

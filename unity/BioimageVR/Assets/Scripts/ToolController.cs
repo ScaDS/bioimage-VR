@@ -3,10 +3,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // welches werkzeug gerade aktiv ist, siehe werkzeugleiste links am volumen
-    // View schaut nur, Measure misst, Segment korrigiert, Assistant fragt das vlm
-    // schaltet mess tool und korrektur modi passend mit, damit nie zwei werkzeuge
-    // gleichzeitig auf denselben klick reagieren
+    // aktives werkzeug, nie zwei gleichzeitig auf denselben klick
     public class ToolController : MonoBehaviour
     {
         public enum Tool { View, Measure, Segment, Assistant }

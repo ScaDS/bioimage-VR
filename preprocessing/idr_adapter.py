@@ -1,12 +1,4 @@
-"""idr metadaten (aus fetch_from_idr.fetch_metadata bzw metadata.json) auf die chunk
-liste aus rag_schema.py mappen
-
-key_values sind idrs freie map annotationen, feldnamen variieren zwischen studien -
-statt fester kandidaten keys pro studie klassifiziert llm_chunker.classify_key_values
-sie automatisch in die FIELD_* kategorien, macht diesen adapter unabhaengig von
-konkreten idr feldnamen. size/channels/voxel_size_um kommen dagegen strukturiert
-direkt aus den pixel daten und bleiben deshalb reiner code, kein llm noetig
-"""
+# idr metadaten auf chunks aus rag_schema.py, key_values klassifiziert das llm
 
 from __future__ import annotations
 
@@ -19,9 +11,7 @@ SOURCE_DB = "idr"
 
 
 def map_idr_metadata(raw: dict) -> list[dict]:
-    """raw = fetch_from_idr.fetch_metadata() ergebnis bzw eine geladene metadata.json
-    ein bild wird zu mehreren chunks, bilder ohne bestimmte felder erzeugen einfach
-    weniger chunks statt platzhaltern"""
+    # raw ist das ergebnis von fetch_metadata, fehlende felder geben einfach weniger chunks
     image_id = raw["image_id"]
     key_values = raw.get("key_values") or {}
     chunks = []
@@ -46,9 +36,7 @@ def map_idr_metadata(raw: dict) -> list[dict]:
 
 
 def _structured_overview_text(raw: dict) -> str:
-    """teil des overview chunks der aus strukturierten pixeldaten kommt (name,
-    channels), zuverlaessiger als jedes key_values feld - organismus etc kommt
-    separat ueber classify_key_values, da das aus key_values stammt"""
+    # overview teil aus strukturierten pixeldaten, zuverlaessiger als key_values
     parts = []
     name = raw.get("name")
     if name:

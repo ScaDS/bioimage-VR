@@ -2,12 +2,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // haengt ein welt canvas neben das volumen, links, unten oder rechts aus sicht des nutzers
-    // folgt mit etwas verzoegerung, dreht sich nur um die hochachse zur kamera
-    // abstand zum volumen waechst mit dessen groesse, bleibt aber in greifweite
-    // beim reinzoomen steht der nutzer im volumen, dann rueckt die ui naeher an die kamera
-    // steckt die kamera ganz drin, z.b. beim fliegen, schwebt die ui vor dem nutzer
-    // und holt erst nach, wenn er sich deutlich wegdreht
+    // haengt ein welt canvas neben das volumen, steckt die kamera drin schwebt es vor dem nutzer
     public class VolumeAnchor : MonoBehaviour
     {
         public enum Side { Left, Bottom, Right }

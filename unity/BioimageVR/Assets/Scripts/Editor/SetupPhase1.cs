@@ -17,8 +17,7 @@ using BioimageVR;
 
 namespace BioimageVR.EditorSetup
 {
-    // headless setup fuer phase 1, urp, volumen material, minimalszene, openxr
-    // einmal nach projekterstellung laufen lassen, kein teil der laufenden app
+    // headless setup fuer phase 1, einmal nach projekterstellung
     public static class SetupPhase1
     {
         private const string VolumeFilePath = @"C:\Users\PC\Documents\ecip\data\sample\idr_6001240.nii.gz";
@@ -55,8 +54,7 @@ namespace BioimageVR.EditorSetup
             QualitySettings.renderPipeline = urpAsset;
         }
 
-        // standalone fuer editor und air link, android fuer die echte apk
-        // ohne loader hier bleibt openxr am geraet aus, nur flaches bild
+        // standalone fuer editor und air link, android fuer die apk, ohne loader bleibt das bild flach
         private static readonly BuildTargetGroup[] OpenXRBuildTargetGroups =
         {
             BuildTargetGroup.Standalone,
@@ -75,8 +73,7 @@ namespace BioimageVR.EditorSetup
 
         private static void EnableOpenXR()
         {
-            // macht dasselbe wie das haekchen in project settings xr plugin management
-            // falls api sich mal aendert, dann manuell in unity readme schritt 2
+            // wie das haekchen in xr plugin management
             try
             {
                 if (!EditorBuildSettings.TryGetConfigObject(
@@ -107,8 +104,7 @@ namespace BioimageVR.EditorSetup
             var generalSettings = buildTargetSettings.SettingsForBuildTarget(group);
             var settingsManager = generalSettings.AssignedSettings;
 
-            // defaults sind false, entspricht initialize xr on startup haekchen
-            // ohne das startet der loader nie, bild bleibt flach
+            // entspricht initialize xr on startup, ohne das startet der loader nie
             settingsManager.automaticLoading = true;
             settingsManager.automaticRunning = true;
             EditorUtility.SetDirty(settingsManager);
@@ -148,9 +144,7 @@ namespace BioimageVR.EditorSetup
             EnableFeature<OculusTouchControllerProfile>(settings, "Oculus Touch Controller Profile");
         }
 
-        // air link laeuft als windows standalone, eigener openxr tab
-        // meta quest support gibts da nicht, controller profil aber schon
-        // war vorher nie aktiviert, deshalb kein controller input ueber link
+        // air link ist windows standalone mit eigenem openxr tab, controller profil dort aktivieren
         private static void EnableOpenXRControllerProfileForStandalone()
         {
             var settings = OpenXRSettings.GetSettingsForBuildTargetGroup(BuildTargetGroup.Standalone);
@@ -214,8 +208,7 @@ namespace BioimageVR.EditorSetup
             light.type = LightType.Directional;
             lightGO.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
 
-            // erst xr origin vr menu item versuchen, macht head tracking automatisch
-            // sonst fallback auf normale camera, dann kein head tracking
+            // erst xr origin versuchen, sonst normale kamera ohne head tracking
             bool xrOriginCreated = TryExecuteMenuItem("GameObject/XR/XR Origin (VR)")
                                    || TryExecuteMenuItem("GameObject/XR/Room-Scale XR Origin");
 

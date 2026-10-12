@@ -3,8 +3,7 @@ using UnityEngine.EventSystems;
 
 namespace BioimageVR
 {
-    // liegt auf dem bild der leinwand, gibt den controller strahl als maus an ScreenMirror weiter
-    // zeigen bewegt die maus in napari, trigger druecken und loslassen ist die linke taste
+    // gibt den controller strahl auf der leinwand als maus an ScreenMirror
     public class ScreenPointer : MonoBehaviour, IPointerMoveHandler, IPointerDownHandler, IPointerUpHandler, IDragHandler
     {
         private ScreenMirror mirror;

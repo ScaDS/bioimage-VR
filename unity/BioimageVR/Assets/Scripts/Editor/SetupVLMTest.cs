@@ -7,8 +7,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR.EditorSetup
 {
-    // setup fuer vlm test, vlmclient plus vlmtestharness, canvas text fuer antwort
-    // sicher erneut ausfuehrbar
+    // setup fuer vlm test, sicher erneut ausfuehrbar
     public static class SetupVLMTest
     {
         private const string ScenePath = "Assets/Scenes/Phase1.unity";

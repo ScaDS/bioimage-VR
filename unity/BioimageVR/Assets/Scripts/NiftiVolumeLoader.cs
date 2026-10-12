@@ -6,8 +6,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // nifti reader, uint8 einkanal oder rgb24, mit gzip und byte order erkennung
-    // mehr datentypen spaeter phase
+    // nifti reader, uint8 einkanal oder rgb24, gzip und byte order
     public static class NiftiVolumeLoader
     {
         public class Volume
@@ -22,18 +21,15 @@ namespace BioimageVR
             // voxel abstand aus pixdim, gegen verzerrung bei nicht kubischen volumen
             public Vector3 VoxelSize;
 
-            // rohe voxel, x schnell y z langsam - bei rgb 3 bytes pro voxel (r,g,b)
-            // gebraucht fuer slice views und koordinaten mapping ohne readback
+            // rohe voxel, x schnell y z langsam, bei rgb 3 bytes pro voxel
             public byte[] Voxels;
 
             public bool IsColor;
 
-            // true wenn r,g,b drei ROHE, unabhaengige kanal-intensitaeten sind statt
-            // einer schon fertig gemischten farbe - siehe LIVE_CHANNELS_MARKER
+            // true wenn r g b rohe kanaele sind, siehe LIVE_CHANNELS_MARKER
             public bool IsLiveChannels;
 
-            // segmentierung, null wenn keine _labels datei daneben liegt
-            // gleiche indizierung wie Voxels, 0 hintergrund
+            // segmentierung, indizierung wie Voxels, null ohne _labels datei
             public ushort[] Labels;
             public Texture3D LabelTexture;
             public int MaxLabel;
@@ -41,8 +37,7 @@ namespace BioimageVR
             public int LabelCount;
             // werte pro zelle, index ist die id, siehe CellStats
             public CellInfo[] Cells;
-            // verdacht auf zwei ineinandergepresste zellen, siehe CellShapeAnalysis
-            // null bis die analyse nach dem laden im hintergrund fertig ist
+            // verdacht auf zwei ineinandergepresste zellen, null bis die analyse fertig ist
             public SplitHint[] SplitHints;
         }
 
@@ -57,8 +52,7 @@ namespace BioimageVR
             public int LabelCount;
         }
 
-        // ergebnis von ParseFile, reine cpu daten ohne texture3d, kann also von jedem
-        // thread erzeugt werden. BuildTexture macht dann den unity-api teil
+        // ergebnis von ParseFile, reine cpu daten, von jedem thread erzeugbar
         public class RawVolumeData
         {
             public int SizeX;
@@ -80,12 +74,10 @@ namespace BioimageVR
         // muss exakt zu preprocessing/convert_to_volume.py: LIVE_CHANNELS_MARKER passen
         private static readonly byte[] LiveChannelsMarker = Encoding.ASCII.GetBytes("biovr:live_channels");
 
-        // laedt und baut die textur direkt, blockiert bis fertig. fuer den
-        // hauptpfad stattdessen ParseFile (thread) + BuildTexture (main thread) nutzen
+        // laedt und baut die textur direkt, blockiert bis fertig
         public static Volume Load(string path) => BuildTexture(ParseFile(path));
 
-        // liest und parst die datei, reine cpu arbeit ohne unity api aufrufe,
-        // deshalb sicher von einem background thread aus aufrufbar
+        // liest und parst die datei ohne unity api, sicher im background thread
         public static RawVolumeData ParseFile(string path)
         {
             byte[] bytes = ReadHeader(path, out bool swap, out short[] dim, out short datatype, out int dataOffset);
@@ -167,8 +159,7 @@ namespace BioimageVR
             return new RawLabelData { SizeX = sizeX, SizeY = sizeY, SizeZ = sizeZ, Labels = labels, MaxLabel = max, LabelCount = distinct };
         }
 
-        // labels als lo und hi byte in rg8, point filter damit ids nicht vermischt werden
-        // shader setzt die id wieder zusammen, siehe SampleLabel
+        // labels als lo und hi byte in rg8, point filter damit ids nicht vermischen
         public static Texture3D BuildLabelTexture(RawLabelData data)
         {
             int count = data.Labels.Length;
@@ -189,8 +180,7 @@ namespace BioimageVR
             return texture;
         }
 
-        // hellster wert je block von BrickSize voxeln, fuer das ueberspringen leerer bereiche im shader
-        // jeder block schaut BrickMargin voxel ueber den rand, die weiche filterung greift so weit
+        // hellster wert je block, shader ueberspringt damit leere bereiche
         public const int BrickSize = 8;
         private const int BrickMargin = 2;
 
@@ -210,8 +200,7 @@ namespace BioimageVR
             int by = (sy + BrickSize - 1) / BrickSize;
             int bz = (sz + BrickSize - 1) / BrickSize;
 
-            // erst ohne rand pro voxel zeile, dann den rand ueber benachbarte bloecke nachziehen
-            // waere schneller, bei 8er bloecken mit 2er rand ist direkt aber schnell genug
+            // direkt gerechnet, bei 8er bloecken mit 2er rand schnell genug
             var max = new byte[bx * by * bz];
             byte[] v = data.Voxels;
             bool color = data.IsColor;
@@ -273,8 +262,7 @@ namespace BioimageVR
             return bytes;
         }
 
-        // baut die gpu textur aus geparsten daten, muss auf dem main thread laufen
-        // (unity texture api ist nicht threadsicher)
+        // baut die gpu textur, nur auf dem main thread
         public static Volume BuildTexture(RawVolumeData data)
         {
             Texture3D texture = data.IsColor
@@ -303,15 +291,12 @@ namespace BioimageVR
                 filterMode = FilterMode.Bilinear
             };
             texture.SetPixelData(voxels, 0);
-            // kein mipmap-update noetig (mipChain=false), und Volume.Voxels haelt schon
-            // eine cpu kopie fuer slice views, unity braucht also keine eigene mehr
+            // keine cpu kopie in unity, Volume.Voxels haelt schon eine
             texture.Apply(false, true);
             return texture;
         }
 
-        // rgb24 hat nur 3 bytes/voxel, Texture3D braucht aber ein von der gpu
-        // unterstuetztes format - RGBA32 ist am zuverlaessigsten plattformuebergreifend,
-        // deshalb hier interleaved r,g,b auf r,g,b,a=255 pro voxel aufblasen
+        // rgb24 auf RGBA32 aufblasen, das format geht ueberall
         private static Texture3D BuildRgbaTexture(int sizeX, int sizeY, int sizeZ, byte[] rgbVoxels)
         {
             int voxelCount = sizeX * sizeY * sizeZ;
@@ -330,14 +315,12 @@ namespace BioimageVR
                 filterMode = FilterMode.Bilinear
             };
             texture.SetPixelData(rgba, 0);
-            // kein mipmap-update noetig (mipChain=false), und Volume.Voxels haelt schon
-            // eine cpu kopie fuer slice views, unity braucht also keine eigene mehr
+            // keine cpu kopie in unity, Volume.Voxels haelt schon eine
             texture.Apply(false, true);
             return texture;
         }
 
-        // prueft ob 'field' (offset/length im header) mit 'marker' beginnt - descrip ist
-        // ein 80-byte freitext-feld, nullterminiert/nullgepolstert, deshalb praefix-check
+        // beginnt das header feld mit dem marker, descrip ist nullgepolsterter freitext
         private static bool HasMarker(byte[] bytes, int offset, int length, byte[] marker)
         {
             if (offset + length > bytes.Length || marker.Length > length) return false;

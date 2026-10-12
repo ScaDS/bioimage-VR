@@ -5,17 +5,7 @@ using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 namespace BioimageVR
 {
-    // durchs volumen fliegen, z.b. in die nase und den hals runter
-    // eigentlich bewegt sich das volumen um den nutzer, die kamera bleibt wo sie ist
-    // rechter stick vor zurueck fliegt dahin wo der rechte controller zeigt, zur seite dreht
-    // linker stick hoch runter macht das volumen groesser oder kleiner, drehpunkt ist der kopf
-    // solange aktiv pausieren VolumeZoom und VolumeRotate, an und aus im View werkzeug
-    // zweiter modus Orient zum zurechtlegen, sticks drehen das volumen statt zu fliegen
-    // linker stick dreht und kippt, rechter stick rollt zur seite und aendert die groesse
-    // drehpunkt ist der kopf solange man drin steckt, die stelle vor einem bleibt also vor einem
-    // dritter modus Path faehrt einen vorberechneten weg ab, siehe FlyPath
-    // rechter stick vor und zurueck entlang des wegs, zur seite drehen, linker stick groesse
-    // am desktop W S und A D rechter stick, R F und Q E linker stick
+    // durchs volumen fliegen, das volumen bewegt sich um den nutzer, modi Fly, Orient und Path
     [RequireComponent(typeof(VolumeView))]
     public class VolumeFly : MonoBehaviour
     {
@@ -165,8 +155,7 @@ namespace BioimageVR
                 zoom.ScaleAround(head, 1f + Curve(left.y) * scaleSpeed * dt);
         }
 
-        // volumen zurechtlegen, achsen aus sicht des nutzers und waagerecht gehalten
-        // vorzeichen wie bei VolumeRotate, fuehlt sich drinnen gleich an wie von aussen
+        // volumen zurechtlegen, vorzeichen wie bei VolumeRotate
         private void Orient(Camera cam, Vector3 head, Vector2 left, Vector2 right, float dt)
         {
             Vector3 forward = cam.transform.forward;

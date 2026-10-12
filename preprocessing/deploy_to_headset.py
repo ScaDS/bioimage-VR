@@ -25,9 +25,7 @@ DEFAULT_PACKAGE = "com.DefaultCompany.BioimageVR"
 SAMPLE_DIR = Path(__file__).resolve().parent.parent / "data" / "sample"
 API_KEY_FILENAME = ".scadsai-api-key"
 
-# kein expliziter package name in player settings gesetzt
-# unity leitet ihn aus companyname und productname ab
-# bei aenderung dort --package mitgeben
+# package name leitet unity aus companyname und productname ab, sonst --package
 
 
 def find_adb() -> str:
@@ -68,8 +66,7 @@ def check_single_device(adb: str) -> None:
 
 
 def setup_usb_reverse(adb: str, port: int = 8000) -> None:
-    # brille erreicht den server dann ueber das kabel unter http://localhost:<port>,
-    # ohne gemeinsames wlan. muss nach jedem neu einstecken wieder laufen
+    # adb reverse, brille erreicht den server ueber das kabel, nach neu einstecken wiederholen
     check_single_device(adb)
     subprocess.run([adb, "reverse", f"tcp:{port}", f"tcp:{port}"], check=True, capture_output=True)
 

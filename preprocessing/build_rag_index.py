@@ -1,9 +1,4 @@
-"""baut/aktualisiert den rag index aus allen lokal vorhandenen idr metadaten
-
-lauf: python preprocessing/build_rag_index.py
-idempotent (id-basiertes upsert in rag_index.py), gefahrlos erneut ausfuehrbar sobald
-neue bilder unter data/idr/ dazukommen
-"""
+# rag index aus allen lokalen idr metadaten bauen, gefahrlos erneut ausfuehrbar
 
 from __future__ import annotations
 

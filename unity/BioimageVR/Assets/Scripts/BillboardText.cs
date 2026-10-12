@@ -2,8 +2,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // dreht sich jeden frame zur kamera, damit text lesbar bleibt egal wie das
-    // eltern-objekt (z.b. ein gedrehtes volumen) gerade orientiert ist
+    // dreht sich jeden frame zur kamera, text bleibt lesbar
     public class BillboardText : MonoBehaviour
     {
         private void LateUpdate()

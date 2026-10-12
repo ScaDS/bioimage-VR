@@ -3,9 +3,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // phase 2 test, feste position als bruchteil je volumen dimension
-    // zeigt 2d slice mit marker punkt und spawnt passenden 3d marker
-    // klick platzierung kommt erst phase 3
+    // phase 2 test, 2d slice mit marker und passender 3d marker
     public class Phase2MarkerDemo : MonoBehaviour
     {
         [SerializeField] private VolumeView volumeView;

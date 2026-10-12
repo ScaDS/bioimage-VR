@@ -3,9 +3,7 @@ using UnityEngine.XR;
 
 namespace BioimageVR
 {
-    // haelt die bildrate, indem der raymarch groeber abtastet statt die aufloesung zu senken
-    // aufloesung bleibt dadurch scharf, auch die schrift, siehe RenderQuality fuer die untergrenze
-    // misst die frame zeit, zu langsam heisst groebere schritte, laenger ruhig wieder feiner
+    // haelt die bildrate ueber groebere raymarch schritte, aufloesung bleibt scharf
     [RequireComponent(typeof(MeshRenderer))]
     public class VolumeStepGovernor : MonoBehaviour
     {

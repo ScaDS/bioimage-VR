@@ -5,11 +5,7 @@ using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 namespace BioimageVR
 {
-    // segmentierte zellen anschauen, nur aktiv wenn die segmentierung sichtbar ist
-    // strahl auf eine zelle, die leuchtet und ein schild zeigt groesse und durchmesser
-    // X oder A waehlt sie aus, ins leere klicken hebt die auswahl auf
-    // ist das mess tool an, gehoeren die klicks dem mess tool, hover bleibt
-    // desktop: maus zeigen, mittlere taste waehlt
+    // segmentierte zellen anschauen, hover zeigt schild, X oder A waehlt aus
     [RequireComponent(typeof(VolumeView))]
     public class CellInspector : MonoBehaviour
     {
@@ -130,8 +126,7 @@ namespace BioimageVR
             return Camera.main.ScreenPointToRay(Mouse.current.position.ReadValue());
         }
 
-        // schild nur fuers hovern, die ausgewaehlte zelle zeigt die karte rechts am volumen
-        // am trefferpunkt wenn der strahl zeigt, ueber der zelle wenn eine listenzeile gehovert wird
+        // schild nur fuers hovern, die auswahl zeigt die karte am volumen
         private void LateUpdate()
         {
             int shown = 0;

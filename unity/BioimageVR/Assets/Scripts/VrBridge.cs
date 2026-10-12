@@ -8,12 +8,7 @@ using UnityEngine.Networking;
 
 namespace BioimageVR
 {
-    // gegenstueck zu preprocessing/vr_bridge.py, verbindung zum napari plugin
-    // fragt alle paar sekunden nach, ob aus napari etwas neues kam, und oeffnet es direkt
-    // schickt ein paar mal pro sekunde blick und auswahl, napari spiegelt die ansicht
-    // server adresse kommt aus IdrClient, nur dort eintragen
-    // klappt die nicht, wird localhost probiert, das geht per usb kabel mit adb reverse
-    // (richtet upload_server.py beim start ein oder der usb knopf im napari plugin)
+    // gegenstueck zu vr_bridge.py, holt neues aus napari, schickt blick und auswahl, localhost als ausweg per usb
     public class VrBridge : MonoBehaviour
     {
         [SerializeField] private IdrClient idrClient;
@@ -35,7 +30,6 @@ namespace BioimageVR
         }
 
         // positionen und richtungen im volumen raum, wuerfel von -0.5 bis 0.5 je achse
-        // so passt es unabhaengig von zoom und drehung auf die daten in napari
         [Serializable] private class ViewState
         {
             public string name;
@@ -51,8 +45,7 @@ namespace BioimageVR
             public bool screenWanted;
             // groesse des volumens, napari zoomt im selben verhaeltnis mit
             public float volScale;
-            // gewuenschte groesse des napari fensters auf dem pc, 1 klein bis 3 gross, 0 nicht anfassen
-            // windowSeq aendert sich mit jedem knopfdruck, napari stellt nur dann um
+            // gewuenschte groesse des napari fensters, 1 klein bis 3 gross, windowSeq zaehlt je knopfdruck
             public int windowSize;
             public long windowSeq;
         }
@@ -93,8 +86,7 @@ namespace BioimageVR
         // zieldrehung aus napari, wird weich angefahren statt gesprungen
         private Quaternion napariTarget;
         private bool hasNapariTarget;
-        // letzter zoom stand aus napari, nur das verhaeltnis zum neuen wird angewendet.
-        // so bleibt zoomen in der brille erhalten und verlorene nachrichten schaden nicht
+        // letzter zoom stand aus napari, nur das verhaeltnis zum neuen wird angewendet
         private long napariZoomId;
         private float lastNapariZoom;
         // faktor der noch aussteht, wird wie die drehung weich angefahren
@@ -255,7 +247,6 @@ namespace BioimageVR
             chatPanel?.AddSystemMessage($"From napari: loading {pending.name} ...");
 
             // flach in persistentDataPath, auf android sucht VolumeView nur dort
-            // und die galerie listet es danach auch
             string dir = Application.persistentDataPath;
             string volumePath = Path.Combine(dir, $"{pending.name}.nii.gz");
             string labelsPath = Path.Combine(dir, $"{pending.name}_labels.nii.gz");
@@ -290,8 +281,7 @@ namespace BioimageVR
             File.WriteAllBytes(targetPath, request.downloadHandler.data);
         }
 
-        // korrigierte maske als neue version an den pc, napari holt sie mit From VR
-        // callback bekommt null bei erfolg, sonst die fehlermeldung
+        // korrigierte maske als neue version an den pc, callback bekommt null bei erfolg
         public void UploadLabels(string name, byte[] niftiGz, Action<string> done)
         {
             if (string.IsNullOrEmpty(BaseUrl))
@@ -355,9 +345,7 @@ namespace BioimageVR
             }
         }
 
-        // in napari gedreht: volumen um die eigene mitte drehen bis man es aus derselben
-        // richtung sieht. in napari gezoomt: um denselben faktor skalieren. der ort bleibt,
-        // dort gewaehlte zelle auch hier waehlen
+        // in napari gedreht oder gezoomt: volumen um die eigene mitte drehen und skalieren, ort bleibt
         private void ApplyNapariView(string json, Camera cam)
         {
             NapariView view;
@@ -474,8 +462,7 @@ namespace BioimageVR
                 forward = (volume.position - eye).normalized;
                 up = Vector3.up;
             }
-            // richtungen mit InverseTransformVector, damit die achsen skalierung
-            // wie bei den positionen mit rausgerechnet wird
+            // richtungen mit InverseTransformVector, rechnet die achsen skalierung mit raus
             return new ViewState
             {
                 name = VolumeName(),

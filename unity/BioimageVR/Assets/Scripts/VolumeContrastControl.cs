@@ -3,9 +3,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // laufzeit-regler fuer den raymarch schwellwert, damit man in vr ohne editor-zugriff
-    // nachjustieren kann wenn ein volumen zu blass/milchig aussieht
-    // regler kommt vom SidePanelController, display tab
+    // regler fuer den raymarch schwellwert im display tab
     public class VolumeContrastControl : MonoBehaviour
     {
         [SerializeField] private VolumeView volumeView;
@@ -34,8 +32,7 @@ namespace BioimageVR
             if (volumeView != null) volumeView.OnVolumeLoaded -= HandleVolumeLoaded;
         }
 
-        // VolumeView.LoadVolume setzt den threshold bei jedem laden auf den default zurueck,
-        // regler muss mitziehen, sonst zeigt er noch die feinjustierung vom vorherigen bild
+        // LoadVolume setzt den threshold zurueck, regler zieht mit
         private void HandleVolumeLoaded(NiftiVolumeLoader.Volume volume) => SyncSliderFromMaterial();
 
         private void SyncSliderFromMaterial()

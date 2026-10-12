@@ -7,14 +7,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // push to talk, trigger halten und sprechen, loslassen zum stoppen
-    // aufnahme geht an sttclient, text plus screenshot an vlmclient
-    // gleiches muster wie vlmtestharness aber index trigger statt a knopf
-    // per tool-calling kann eine gesprochene anweisung ("mach mal heller") auch direkt
-    // die render-regler bedienen statt nur eine textantwort zu bekommen, siehe
-    // VLMToolDispatcher.cs und CHATMICROSCOPY.md abschnitt 3.2
-    // rag kontext (RagClient.cs) fuers gerade geladene bild wird vor der vlm anfrage
-    // geholt und als zusaetzlicher context string mitgegeben, siehe plan zum rag umbau
+    // push to talk, aufnahme an stt, text plus screenshot plus rag kontext ans vlm
     [RequireComponent(typeof(VLMClient))]
     [RequireComponent(typeof(STTClient))]
     [RequireComponent(typeof(RagClient))]
@@ -178,8 +171,7 @@ namespace BioimageVR
                 });
         }
 
-        // liest die idr bild-id aus dem dateinamen des gerade geladenen volumens,
-        // gleiche idr_<id>.nii.gz konvention wie fetch_from_idr.fetch_one/IdrClient
+        // idr bild id aus dem dateinamen idr_<id>.nii.gz
         private int? CurrentIdrImageId()
         {
             if (volumeView == null || string.IsNullOrEmpty(volumeView.VolumeFilePath)) return null;

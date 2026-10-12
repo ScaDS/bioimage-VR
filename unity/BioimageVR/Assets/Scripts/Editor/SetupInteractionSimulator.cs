@@ -9,14 +9,7 @@ using PackageInfo = UnityEditor.PackageManager.PackageInfo;
 
 namespace BioimageVR.EditorSetup
 {
-    // bringt das xr interaction simulator sample prefab in die szene
-    // ersatz fuer den alten legacy xr device simulator, der kein point and click aufs ui kann
-    // simuliert kopf und beide controller per maus und tastatur, gleiche xrcontroller
-    // lefthand righthand geraeteschicht wie unsere bindings, laeuft daher ohne aenderung
-    // auch ohne quest
-    // startet deaktiviert, im hierarchy fenster einschalten fuer tests ohne brille
-    // fuer echte headset tests wieder aus, sonst konkurriert er um dieselben bindings
-    // menu: BioimageVR Setup Interaction Simulator
+    // xr interaction simulator in die szene, startet deaktiviert, fuer headset tests aus lassen
     public static class SetupInteractionSimulator
     {
         private const string ScenePath = "Assets/Scenes/Phase1.unity";

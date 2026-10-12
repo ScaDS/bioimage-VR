@@ -1,8 +1,4 @@
-"""testfragen fuers retrieval, jeweils bezogen auf ein konkret geladenes bild - kein
-automatisches scoring, ausgabe zum gegenlesen. siehe plan fuer die begruendung der fragen
-
-lauf: python preprocessing/rag_test_questions.py
-"""
+# testfragen fuers retrieval je geladenem bild, ausgabe zum gegenlesen
 
 from __future__ import annotations
 

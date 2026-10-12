@@ -5,8 +5,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // karte "Current image" oben im images tab, das wichtigste aus metadata.json
-    // name, groesse, voxelgroesse, kanaele. anzeige kommt vom SidePanelController
+    // karte Current image im images tab, das wichtigste aus metadata.json
     public class VolumeMetadataPanel : MonoBehaviour
     {
         [SerializeField] private VolumeView volumeView;
@@ -59,8 +58,7 @@ namespace BioimageVR
 
         private void HandleVolumeLoaded(NiftiVolumeLoader.Volume volume) => Refresh();
 
-        // <name>_metadata.json zuerst (android, flach im persistentDataPath gepusht),
-        // sonst metadata.json im selben ordner (editor, ein ordner pro bild)
+        // <name>_metadata.json zuerst, sonst metadata.json im selben ordner
         private void Refresh()
         {
             if (titleText == null || volumeView == null) return;

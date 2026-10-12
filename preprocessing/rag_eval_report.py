@@ -1,10 +1,4 @@
-"""liest data/rag_eval_results.csv (siehe rag_eval.py) und baut eine kurze
-auswertung: balkendiagramm trefferquote pro fakt-typ + liste der falschen
-antworten zum gegenlesen
-
-lauf: python rag_eval_report.py
-schreibt data/rag_eval_report.png
-"""
+# auswertung von rag_eval_results.csv, schreibt rag_eval_report.png
 
 from __future__ import annotations
 
@@ -106,9 +100,7 @@ def build_chart(rows: list[dict]) -> None:
 
 
 def build_heatmap(rows: list[dict]) -> None:
-    """bild x fakt-typ raster, deckt muster auf die der aggregierte balken pro
-    fakt-typ verdeckt (z.b. wenn ausgerechnet ein bestimmtes bild durchgehend
-    falsch beantwortet wird, obwohl jeder fakt-typ einzeln gut aussieht)"""
+    # raster bild mal fakt typ, zeigt muster die der balken verdeckt
     fact_types = sorted({r["fact_type"] for r in rows}, key=lambda ft: FACT_LABELS.get(ft, ft))
     image_ids = sorted({r["image_id"] for r in rows}, key=int)
     by_cell = {(r["image_id"], r["fact_type"]): r["correct"] for r in rows}
@@ -157,13 +149,7 @@ def build_heatmap(rows: list[dict]) -> None:
 
 
 def build_context_comparison_chart(rows: list[dict]) -> None:
-    """kernstueck des "lab"-punkts (Punkt 14 der Wunschliste, STATUS.md 25.08.): zeigt
-    pro fakt-typ die trefferquote mit rag-kontext neben der trefferquote ganz ohne
-    kontext (nur bild+frage) - eine grosse luecke heisst das vlm "weiss"/erraet das
-    kaum selbst und ist stark auf den rag-kontext angewiesen, eine kleine luecke heisst
-    es kann viel schon direkt aus dem bild bzw. antrainiertem wissen beantworten.
-    laeuft nur ueber zeilen die ein 'condition' feld haben - aeltere csv-staende ohne
-    das feld (vor diesem umbau) werden sauber uebersprungen statt zu crashen"""
+    # trefferquote mit und ohne rag kontext je fakt typ, zeilen ohne condition feld uebersprungen
     rows = [r for r in rows if r.get("condition")]
     if not rows:
         print("keine vergleichsdaten (condition fehlt) - rag_eval.py mit dem aktuellen "

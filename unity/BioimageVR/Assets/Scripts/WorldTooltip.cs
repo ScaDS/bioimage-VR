@@ -4,9 +4,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // kleines schild im raum, dunkle flaeche mit tmp text, dreht sich zur kamera
-    // zur laufzeit gebaut, ersetzt die alten TextMesh schilder von mess tool und hover
-    // erste zeile fett, zahlen in der monospace schrift ueber <font> tags im text
+    // kleines schild im raum, dreht sich zur kamera, erste zeile fett
     public class WorldTooltip : MonoBehaviour
     {
         private TextMeshProUGUI text;

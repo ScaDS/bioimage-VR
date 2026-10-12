@@ -7,12 +7,7 @@ using UnityEngine.Rendering;
 
 namespace BioimageVR
 {
-    // segmentierung korrigieren, stufe 3
-    // loeschen macht eine zelle zu hintergrund, verbinden legt zwei labels zusammen
-    // teilen schneidet eine zelle entlang der ebene aus SplitPlaneTool in zwei
-    // jede aenderung landet auf der undo liste, speichern schreibt lokal und schickt an den pc
-    // textur wird nur im geaenderten bereich neu hochgeladen, sonst 35 mb pro klick
-    // in napari gemalte aenderungen kommen als ausschnitt ueber VrBridge, siehe ApplyPatch
+    // segmentierung korrigieren: loeschen, verbinden, teilen, undo, speichern lokal und an den pc
     [RequireComponent(typeof(VolumeView))]
     public class LabelEditor : MonoBehaviour
     {
@@ -167,8 +162,7 @@ namespace BioimageVR
         public void Split(int id, Vector3 pointWorld, Vector3 normalWorld)
         {
             if (!Available) return;
-            // ebene in voxel koordinaten, normale mit der transponierten matrix wegen der
-            // nicht gleichmaessigen skalierung des wuerfels
+            // ebene in voxel koordinaten, normale mit der transponierten matrix
             Vector3 pointLocal = transform.InverseTransformPoint(pointWorld);
             Vector3 normalLocal = transform.localToWorldMatrix.transpose.MultiplyVector(normalWorld);
             var size = new Vector3(Vol.SizeX, Vol.SizeY, Vol.SizeZ);
@@ -177,8 +171,7 @@ namespace BioimageVR
             SplitVoxel(id, pointVoxel, normalVoxel);
         }
 
-        // vorschlag aus CellShapeAnalysis, ebene durch die engstelle senkrecht zur
-        // verbindung der beiden blob mitten, senkrecht in um gemessen
+        // vorschlag aus CellShapeAnalysis, ebene durch die engstelle
         public void SplitAtHint(int id)
         {
             SplitHint hint = volumeView.GetSplitHint(id);
@@ -276,8 +269,7 @@ namespace BioimageVR
 
         // aus napari
 
-        // ausschnitt der maske aus napari einsetzen, werte als uint16 mit x am schnellsten.
-        // betroffene zellen werden neu vermessen, neue nummern kommen dazu
+        // ausschnitt der maske aus napari einsetzen, uint16 mit x am schnellsten
         public bool ApplyPatch(Vector3Int min, Vector3Int size, byte[] data)
         {
             if (!Available) return false;
@@ -430,8 +422,7 @@ namespace BioimageVR
 
         // textur
 
-        // kleine 3d textur nur fuer den rahmen, dann schichtweise per CopyTexture hinein
-        // wo die gpu keine 3d kopien kann, die ganze textur neu bauen
+        // kleine 3d textur fuer den rahmen und per CopyTexture hinein, sonst ganze textur neu
         private void UploadRegion(Vector3Int min, Vector3Int max)
         {
             Texture3D target = Vol.LabelTexture;
@@ -486,9 +477,7 @@ namespace BioimageVR
 
         // speichern
 
-        // lokal ueberschreiben, damit die korrektur beim naechsten oeffnen noch da ist
-        // das original bleibt einmalig als _labels_v001 daneben liegen
-        // danach als neue version an den pc, napari zieht sie von selbst nach
+        // lokal ueberschreiben, original einmalig als _labels_v001, danach an den pc
         public void Save()
         {
             if (!Available) return;
@@ -509,8 +498,7 @@ namespace BioimageVR
                 return;
             }
 
-            // per usb kabel aufgespielte dateien darf die app nicht ueberschreiben, dann daneben
-            // als _labels_edited ablegen, VolumeView nimmt die neuere von beiden
+            // aufgespielte dateien sind schreibgeschuetzt, dann daneben als _labels_edited
             string localError = null;
             try
             {

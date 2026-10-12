@@ -4,8 +4,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // api key laden fuer vlm und stt
-    // quest hat keinen home ordner, dort persistentDataPath nutzen
+    // api key fuer vlm und stt, auf der quest aus persistentDataPath
     internal static class ApiKeyLoader
     {
         private const string FileName = ".scadsai-api-key";

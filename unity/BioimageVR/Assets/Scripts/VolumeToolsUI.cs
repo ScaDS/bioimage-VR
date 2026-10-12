@@ -8,10 +8,7 @@ using UnityEngine.XR.Interaction.Toolkit.UI;
 
 namespace BioimageVR
 {
-    // oberflaeche rund ums volumen, abgestimmtes mockup vom 30.09.
-    // links die werkzeugleiste, unten die optionen des aktiven werkzeugs mit einer hinweiszeile,
-    // rechts die karte zur ausgewaehlten zelle. zur laufzeit gebaut, das setup verdrahtet nur
-    // die referenzen, aussehen aendern braucht also kein neues Setup Side Panel
+    // oberflaeche ums volumen: werkzeugleiste links, optionen unten, zellkarte rechts, zur laufzeit gebaut
     public class VolumeToolsUI : MonoBehaviour
     {
         [SerializeField] private VolumeView volumeView;
@@ -76,8 +73,7 @@ namespace BioimageVR
             RefreshTools();
         }
 
-        // quest meldet controller auch als gamepad, ui modul verschiebt damit den zuletzt
-        // angeklickten regler. sticks gehoeren dem volumen, ui nur per strahl
+        // quest meldet controller auch als gamepad, sticks gehoeren dem volumen, ui nur per strahl
         private static void DisableStickNavigation()
         {
             var eventSystem = EventSystem.current;
@@ -151,8 +147,7 @@ namespace BioimageVR
             renderSegmented.SelectionChanged += index => renderControls?.SetRenderModeExternal((VolumeRenderControls.Mode)index);
             flyButton = UIKit.Button(view, "Fly", UIKit.ButtonStyle.Secondary);
             flyButton.onClick.AddListener(() => volumeFly?.SetActive(!volumeFly.Active));
-            // nur beim fliegen sichtbar, Orient legt das volumen zurecht statt zu fliegen
-            // Path faehrt den vorberechneten weg ab, im surface modus sieht man dabei die waende
+            // nur beim fliegen sichtbar, Orient legt zurecht, Path faehrt den weg ab
             flyModeSegmented = UIKit.Segmented(view, "FlyMode", "Move", "Orient", "Path");
             flyModeSegmented.SelectionChanged += index =>
             {

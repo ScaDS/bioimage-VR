@@ -7,9 +7,7 @@ using UnityEngine.Networking;
 
 namespace BioimageVR
 {
-    // openai-kompatibles tool/function-calling schema, siehe CHATMICROSCOPY.md 3.2 -
-    // ParametersJson ist rohes json-schema (nur ein paar simple flache tools, kein
-    // generischer serializer noetig)
+    // openai kompatibles tool schema, ParametersJson ist rohes json schema
     [Serializable]
     public class ToolDefinition
     {
@@ -18,8 +16,7 @@ namespace BioimageVR
         public string ParametersJson;
     }
 
-    // ergebnis eines vom vlm ausgeloesten tool-calls, ArgumentsJson noch roh (der
-    // aufrufer/dispatcher kennt die konkrete argument-struktur pro tool-name)
+    // tool call vom vlm, ArgumentsJson noch roh
     public class ToolCall
     {
         public string Name;
@@ -52,10 +49,7 @@ namespace BioimageVR
             AskAboutImage(image, question, null, tools, onTextAnswer, onToolCalls, onError);
         }
 
-        // mit optionalem rag kontext (siehe RagClient.cs) als zusaetzliche system-message
-        // vor der eigentlichen frage, plus tools: modell antwortet entweder in text
-        // (onTextAnswer) oder mit tool-calls (onToolCalls) - tool_choice "auto" laesst
-        // das modell selbst entscheiden je nach frage, kein extra modus-umschalter noetig
+        // frage mit optionalem rag kontext und tools, antwort als text oder tool calls
         public void AskAboutImage(Texture2D image, string question, string context, IReadOnlyList<ToolDefinition> tools,
             Action<string> onTextAnswer, Action<List<ToolCall>> onToolCalls, Action<string> onError)
         {
@@ -92,8 +86,7 @@ namespace BioimageVR
             ParseResponse(request.downloadHandler.text, onTextAnswer, onToolCalls, onError);
         }
 
-        // json von hand gebaut, feste form, kein package noetig
-        // image_url ist hier ein reiner data url string, nicht das offizielle objekt
+        // json von hand gebaut, image_url ist ein data url string
         private static string BuildRequestJson(string model, string question, string context, string dataUrl, IReadOnlyList<ToolDefinition> tools)
         {
             string toolsJson = "";
@@ -112,8 +105,7 @@ namespace BioimageVR
                 toolsJson = $",\"tools\":[{string.Join(",", entries)}],\"tool_choice\":\"auto\"";
             }
 
-            // rag kontext (siehe RagClient.cs) als eigene system-message vor der frage,
-            // damit das modell zwischen hintergrundwissen und eigentlicher frage trennt
+            // rag kontext als eigene system message vor der frage
             string systemMessage = string.IsNullOrEmpty(context)
                 ? ""
                 : "{\"role\":\"system\",\"content\":\"" + JsonEscape(context) + "\"},";

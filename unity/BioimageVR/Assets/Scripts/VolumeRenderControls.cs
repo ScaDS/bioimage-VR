@@ -4,9 +4,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // laufzeit regler fuer density, cut range max, render modus, shading und kanaele
-    // ergaenzt VolumeContrastControl (threshold), anzeige kommt vom SidePanelController
-    // display tab, dieselben External methoden nutzt der VLMToolDispatcher
+    // regler fuer density, cut range, render modus, shading und kanaele im display tab
     public class VolumeRenderControls : MonoBehaviour
     {
         // reihenfolge wie im shader, _RenderMode 0 1 2
@@ -95,8 +93,7 @@ namespace BioimageVR
                 channelSwitches[i].SetWithoutNotify(mat.GetFloat(ChannelIds[i]) > 0.5f);
         }
 
-        // fuer aufrufer ausserhalb der ui, z.b. VLMToolDispatcher und die View werkzeugleiste,
-        // setzt material UND anzeige, damit die regler im panel sichtbar mitwandern
+        // fuer aufrufer ausserhalb der ui, setzt material und anzeige
         public void SetDensityExternal(float value)
         {
             SetFloat(DensityId, value);

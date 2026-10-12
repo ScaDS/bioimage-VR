@@ -6,15 +6,7 @@ using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 namespace BioimageVR
 {
-    // messtool, modus kommt von MeasureToolbar im hud, startet aus
-    // gemessen wird mit X oder A wie ein ui klick, nur wenn der strahl nicht aufs panel zeigt
-    // desktop: mittlere maustaste an der mausposition
-    // lineal: erster klick start, zweiter klick ende, dritter klick neuer start
-    // auto: klick auf blob, flood fill im aktuellen threshold bereich, 6er nachbarschaft
-    // punkte landen auf der ersten sichtbaren struktur entlang des strahls
-    // gleiche intensitaets regel wie SampleVoxel im shader, also misst was man sieht
-    // ins leere klicken loescht die messung
-    // mit sichtbarer segmentierung misst auto die angeklickte zelle statt threshold blob
+    // messtool, lineal mit zwei klicks, auto per flood fill oder zelle, ins leere loescht
     [RequireComponent(typeof(VolumeView))]
     public class MeasureTool : MonoBehaviour
     {
@@ -514,8 +506,7 @@ namespace BioimageVR
             };
         }
 
-        // strahl durch die box marschieren, erster voxel im threshold bereich
-        // hit ist der genaue punkt auf dem strahl im volumen raum, voxel der index dazu
+        // strahl durch die box, erster voxel im threshold bereich
         private bool TryPick(Ray worldRay, out Vector3 hitLocal, out int voxel)
         {
             hitLocal = default;

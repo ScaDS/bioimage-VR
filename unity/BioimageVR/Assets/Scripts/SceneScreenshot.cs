@@ -2,13 +2,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // ScreenCapture.CaptureScreenshotAsTexture liest vom normalen screen-backbuffer -
-    // auf der quest rendert openxr aber per single pass stereo direkt in den xr
-    // compositor, dadurch kam beim vlm nur die leere kamera-hintergrundfarbe an statt
-    // der echten szene (siehe VLMTestHarness alter kommentar "screenshot faengt
-    // spectator fenster ein, nicht das echte augenbild"). rendert die kamera stattdessen
-    // manuell in eine eigene rendertexture - das umgeht den xr swapchain komplett und
-    // liefert ein normales mono bild, im editor wie auf dem geraet gleich
+    // kamera in eigene rendertexture, ScreenCapture liefert auf der quest nur den hintergrund
     public static class SceneScreenshot
     {
         public static Texture2D Capture(Camera camera)

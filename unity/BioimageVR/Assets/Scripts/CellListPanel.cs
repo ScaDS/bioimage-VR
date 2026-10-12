@@ -6,10 +6,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // tab "Cells" im seitenpanel, tabelle aller segmentierten zellen
-    // strahl auf eine zeile laesst die zelle im volumen aufleuchten, klick waehlt sie aus
-    // augen knopf rechts blendet die zelle aus, damit man dahinter sieht
-    // vom SidePanelController zur laufzeit auf die seite gesetzt, OnEnable baut beim oeffnen neu
+    // tab Cells, tabelle aller zellen, zeile hebt hervor, klick waehlt, auge blendet aus
     public class CellListPanel : MonoBehaviour
     {
         private VolumeView volumeView;

@@ -2,11 +2,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // haengt an einem kamera-fixierten hud-anker (siehe SetupSidePanel.CreateAxisGizmo),
-    // dadurch immer an derselben stelle im sichtfeld (unten links) statt am volumen
-    // selbst zu haengen. die rotation wird trotzdem jeden frame vom volumen
-    // uebernommen, damit der gizmo zeigt wie die daten gerade tatsaechlich orientiert
-    // sind (22.09. wunsch: soll immer unten links sein, nicht am volumen mitwandern)
+    // achsen gizmo unten links im sichtfeld, rotation kommt jeden frame vom volumen
     public class VolumeAxisLabels : MonoBehaviour
     {
         [SerializeField] private Transform volumeTransform;

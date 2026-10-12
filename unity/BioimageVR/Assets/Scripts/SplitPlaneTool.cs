@@ -5,10 +5,7 @@ using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 namespace BioimageVR
 {
-    // schnittebene zum teilen einer zelle, entscheidung 23.09.: ebene statt freihand
-    // folgt dem controller der auf die zelle zeigt, die ebene enthaelt den strahl,
-    // gekippt wird sie durchs drehen des handgelenks. wie ein messer von vorne
-    // aktiv nur solange LabelEditor.SplitSource gesetzt ist
+    // schnittebene zum teilen einer zelle, folgt dem controller, kippen durchs handgelenk
     [RequireComponent(typeof(VolumeView))]
     public class SplitPlaneTool : MonoBehaviour
     {
@@ -90,8 +87,7 @@ namespace BioimageVR
             return TryPlaneFromRay(new Ray(origin.position, origin.forward), origin.up, source, cell);
         }
 
-        // ebene durch den trefferpunkt auf der zelle, oder den naechsten punkt zum schwerpunkt
-        // normale steht senkrecht auf strahl und controller oben, ebene enthaelt also den strahl
+        // ebene durch den trefferpunkt, enthaelt den strahl
         private bool TryPlaneFromRay(Ray ray, Vector3 up, int source, CellInfo cell)
         {
             Vector3 point;

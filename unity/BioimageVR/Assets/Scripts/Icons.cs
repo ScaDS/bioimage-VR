@@ -1,7 +1,6 @@
 namespace BioimageVR
 {
-    // zeichen aus Assets/Fonts/BioimageVRIcons.ttf, material symbols rounded (apache 2.0)
-    // auf genau diese icons zugeschnitten, weitere brauchen einen neuen zuschnitt der schrift
+    // zeichen aus BioimageVRIcons.ttf, material symbols rounded (apache 2.0), zugeschnitten
     public static class Icons
     {
         public const string View = "";

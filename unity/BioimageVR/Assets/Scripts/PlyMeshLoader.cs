@@ -6,9 +6,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // binaeres ply laden, wie es preprocessing/decimate_mesh.py (trimesh) oder rohe
-    // connectomics-exporte (z.b. microns-explorer.org) liefern - nur dreiecksmeshes,
-    // nur x/y/z positionen im file, keine farben/normalen (RecalculateNormals stattdessen)
+    // binaeres ply laden, nur dreiecke und positionen
     public static class PlyMeshLoader
     {
         public static Mesh Load(string path)
@@ -51,8 +49,7 @@ namespace BioimageVR
                 }
                 else if (line.StartsWith("property list") && currentElement == 2)
                 {
-                    // "property list uchar int vertex_indices" (trimesh) oder
-                    // "property list int int vertex_indices" (rohe microns-exporte)
+                    // vertex_indices als uchar int (trimesh) oder int int (microns)
                     faceCountType = line.Split(' ')[2];
                 }
                 else if (line.StartsWith("property") && currentElement == 1)

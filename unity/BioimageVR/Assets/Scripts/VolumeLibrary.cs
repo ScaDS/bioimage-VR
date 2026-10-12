@@ -6,9 +6,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // findet alle verfuegbaren nii.gz volumen fuer die galerie
-    // android: schon gepushte dateien in persistentDataPath
-    // editor und standalone: lokaler data ordner im projekt
+    // findet alle nii.gz volumen, android in persistentDataPath, sonst im data ordner
     public static class VolumeLibrary
     {
         public struct Entry
@@ -40,8 +38,7 @@ namespace BioimageVR
                 paths.AddRange(Directory.GetFiles(dataRoot, "*.nii.gz", SearchOption.AllDirectories));
 #endif
 
-            // masken gehoeren zu einem bild, keine eigenen galerie eintraege
-            // auch versionen aus der napari bruecke, <name>_labels_v002.nii.gz
+            // masken sind keine eigenen galerie eintraege, auch versionen wie _labels_v002
             var entries = paths
                 .Where(p => !LabelsFilePattern.IsMatch(p))
                 .OrderBy(p => p)
@@ -56,9 +53,7 @@ namespace BioimageVR
             return entries;
         }
 
-        // <name>_thumbnail.jpg statt fix "thumbnail.jpg" (siehe fetch_from_idr.
-        // thumbnail_path_for) - kollisionsfrei falls mehrere volumen im selben ordner
-        // liegen, z.b. flach in persistentDataPath auf android
+        // <name>_thumbnail.jpg, kollisionsfrei wenn alles flach in einem ordner liegt
         private static string ResolveThumbnailPath(string volumePath)
         {
             string stem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(volumePath));
@@ -66,9 +61,7 @@ namespace BioimageVR
             return File.Exists(thumbnailPath) ? thumbnailPath : "";
         }
 
-        // sucht ein metadata.json daneben (siehe fetch_from_idr.py), sonst nur dateiname
-        // varianten im selben ordner (_original, _denoised) teilen sich das metadata.json,
-        // suffix deshalb mit anhaengen, sonst heissen alle gleich
+        // name aus metadata.json, suffix der variante anhaengen, sonst heissen alle gleich
         private static string ResolveDisplayName(string volumePath)
         {
             string stem = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(volumePath));

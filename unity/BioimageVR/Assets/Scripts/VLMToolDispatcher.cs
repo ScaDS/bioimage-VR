@@ -4,12 +4,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // definiert die werkzeuge, die das vlm per tool-calling aufrufen kann (siehe
-    // CHATMICROSCOPY.md abschnitt 3.2), und fuehrt sie aus - bindet an die schon
-    // vorhandenen regler (VolumeContrastControl, VolumeRenderControls), damit die
-    // slider im panel sich mitbewegen wenn das vlm einen wert setzt. kein zweiter
-    // api-rundtrip fuer eine bestaetigung - Execute() gibt direkt einen kurzen
-    // deutschen bestaetigungstext zurueck, den der aufrufer ins chat-panel haengt
+    // werkzeuge fuers vlm tool calling, fuehrt sie an den vorhandenen reglern aus
     public class VLMToolDispatcher : MonoBehaviour
     {
         [SerializeField] private VolumeContrastControl contrastControl;

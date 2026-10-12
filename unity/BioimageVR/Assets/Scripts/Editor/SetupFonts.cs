@@ -6,10 +6,7 @@ using UnityEngine.TextCore.LowLevel;
 
 namespace BioimageVR.EditorSetup
 {
-    // tmp schriften aus Assets/Fonts bauen, nach Resources/Fonts & Materials, dort findet UITheme.Font sie
-    // beim ersten lauf fehlen die tmp grundressourcen (shader, einstellungen), die werden dann
-    // importiert und man muss einmal neu starten, danach laeuft alles in einem rutsch
-    // menu: BioimageVR Setup Fonts, laeuft auch am anfang von Setup Side Panel mit
+    // tmp schriften aus Assets/Fonts bauen, beim ersten lauf einmal neu starten
     public static class SetupFonts
     {
         private const string SourceDir = "Assets/Fonts";

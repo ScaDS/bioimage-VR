@@ -6,8 +6,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // haelt frage antwort verlauf fest, scrollt automatisch runter
-    // anzeige kommt vom SidePanelController, der den chat tab zur laufzeit baut
+    // frage antwort verlauf, scrollt automatisch runter
     public class ChatPanel : MonoBehaviour
     {
         [SerializeField] private int maxMessages = 40;

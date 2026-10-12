@@ -6,13 +6,7 @@ using UnityEngine.XR.Interaction.Toolkit.UI;
 
 namespace BioimageVR
 {
-    // kleine karte beim fliegen, ein schnitt durchs volumen mit einem punkt wo man gerade ist
-    // die schnittebene ist die, in der der flugweg am meisten strecke macht, ohne weg die
-    // mit der groessten flaeche. der schnitt wandert mit, er liegt immer auf hoehe des nutzers
-    // weg und stationen sind eingezeichnet, Rotate dreht die karte in vierteldrehungen
-    // schwebt rechts unten vor dem nutzer und ist ihm zugewandt, folgt dem kopf traege
-    // an der leiste oben greifen und verschieben, der neue platz bleibt relativ zum kopf
-    // zur laufzeit gebaut, nur sichtbar solange Fly an ist
+    // kleine karte beim fliegen, schnitt auf hoehe des nutzers mit weg und stationen
     [RequireComponent(typeof(VolumeView))]
     public class FlyMap : MonoBehaviour
     {

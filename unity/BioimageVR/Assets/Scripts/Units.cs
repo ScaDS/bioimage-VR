@@ -2,8 +2,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // laengen und volumen passend formatieren, egal ob zellen in µm oder ein kopf in mm
-    // werte kommen in der einheit des geladenen bilds, siehe VolumeView.Unit
+    // laengen und volumen formatieren, einheit wie VolumeView.Unit
     public static class Units
     {
         public static float ToMicrometers(string unit) => unit switch

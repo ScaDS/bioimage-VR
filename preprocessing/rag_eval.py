@@ -1,13 +1,4 @@
-"""rag pipeline end-to-end pruefen: pro lokal vorhandenem idr bild werden die harten,
-eindeutig pruefbaren fakten (rag_ground_truth.py) als frage an den echten vlm-chat
-gestellt - bild + frage + rag kontext, genau wie in der app (VLMClient.cs) - und die
-antwort automatisch gegen die ground truth geprueft (einfacher substring vergleich,
-keine bewertung durch ein llm - bleibt so nachvollziehbar/deterministisch)
-
-lauf: python rag_eval.py
-schreibt data/rag_eval_results.csv, eine zeile pro (bild, fakt). fuer die
-auswertung/grafiken siehe rag_eval_report.py
-"""
+# rag pipeline pruefen, harte fakten als frage ans vlm, schreibt rag_eval_results.csv
 
 from __future__ import annotations
 
@@ -31,10 +22,7 @@ THUMBNAIL_URL = "https://idr.openmicroscopy.org/webclient/render_thumbnail/{id}/
 OUTPUT_CSV = DATA_ROOT.parent / "rag_eval_results.csv"
 CSV_FIELDS = ["image_id", "fact_type", "question", "condition", "expected", "answer", "correct"]
 
-# "lab" fuer punkt 14 der wunschliste (STATUS.md 25.08.): nicht nur pruefen ob rag
-# insgesamt funktioniert, sondern explizit vergleichen wie das vlm mit vs ohne die
-# rag-metadaten abschneidet - zeigt wie viel das modell rein aus dem bild selbst
-# "weiss"/errät gegenueber dem was ihm erst per kontext gesagt werden muss
+# vergleich vlm mit und ohne rag kontext
 CONDITION_WITH_CONTEXT = "mit_kontext"
 CONDITION_WITHOUT_CONTEXT = "ohne_kontext"
 
@@ -47,8 +35,7 @@ def _api_key() -> str:
 
 
 def _thumbnail_bytes(image_id: str) -> bytes:
-    """einmal pro bild von idr geladen, danach lokal gecacht - unabhaengig vom
-    3d volumen (nii.gz), reicht als 2d bild fuers vision modell"""
+    # vorschaubild einmal von idr laden und lokal cachen
     cache_path = DATA_ROOT / image_id / "thumbnail.jpg"
     if cache_path.is_file():
         return cache_path.read_bytes()
@@ -59,9 +46,7 @@ def _thumbnail_bytes(image_id: str) -> bytes:
 
 
 def _rag_context(question: str, image_id: str) -> str:
-    """gleiche logik wie upload_server.py's /rag_query endpunkt, hier direkt
-    in-process statt ueber http - damit der eval nicht von einem laufenden
-    server abhaengt"""
+    # logik wie der rag_query endpunkt, direkt im prozess ohne laufenden server
     own_hits = rag_query_index(question, n_results=4, source_id=image_id)
     other_hits = rag_query_index(question, n_results=4)
     other_hits = [h for h in other_hits if h["metadata"]["source_id"] != str(image_id)]
@@ -98,27 +83,13 @@ def _ask_vlm(question: str, context: str, image_bytes: bytes) -> str:
     except urllib.error.URLError as error:
         raise RuntimeError(f"vlm gateway nicht erreichbar: {error.reason}") from error
     except TimeoutError as error:
-        # urllib wrappt nicht jeden socket-timeout zuverlaessig in URLError (siehe
-        # session 26.08. - ein einzelner haenger hat sonst den ganzen lauf abgebrochen
-        # und alle bisherigen ergebnisse mitgerissen, weil vorher erst am ende
-        # geschrieben wurde - jetzt schreibt run() ohnehin pro zeile, aber trotzdem
-        # sauber als RuntimeError behandeln statt den lauf abstuerzen zu lassen)
+        # socket timeout als RuntimeError, sonst bricht ein haenger den ganzen lauf ab
         raise RuntimeError(f"vlm anfrage timeout: {error}") from error
     return data["choices"][0]["message"]["content"] or ""
 
 
 def _grade(fact_type: str, expected: str, answer: str) -> bool:
-    """einfacher, nachvollziehbarer vergleich statt llm-als-richter. resolution ist
-    ein sonderfall (drei zahlen, vlm formatiert die meist anders als "x, y, z" -
-    jede zahl fuer sich pruefen statt den ganzen string).
-
-    fuer alles andere: wortstamm-vergleich statt exaktem substring - das vlm
-    antwortet auf deutsch und uebersetzt englische fachbegriffe aus den metadaten
-    konsequent (z.b. "Manual" -> "Manuell"), ein exakter stringvergleich wuerde
-    das faelschlich als falsch werten obwohl die antwort inhaltlich stimmt. jedes
-    wort ab 4 zeichen im erwarteten wert muss (auf die ersten 4 zeichen gekuerzt)
-    in der antwort vorkommen - kurze wortstaemme wie bei "manuell"/"manual"
-    ueberleben eine deutsche endung, kein hartkodiertes uebersetzungs-woerterbuch"""
+    # wortstamm vergleich statt llm richter, resolution zahl fuer zahl
     answer_lower = answer.lower()
     if fact_type == FACT_RESOLUTION:
         numbers = re.findall(r"\d+\.\d{2}", expected)
@@ -132,9 +103,7 @@ def _grade(fact_type: str, expected: str, answer: str) -> bool:
 
 
 def run(limit: int | None = None) -> None:
-    # zeilenweise schreiben statt erst am ende (siehe session 26.08.) - ein einzelner
-    # timeout mitten im lauf hat sonst alle bisherigen ergebnisse mitgerissen, weil
-    # vorher nur ganz am schluss auf einmal geschrieben wurde
+    # zeilenweise schreiben, ein timeout riss sonst alle ergebnisse mit
     rows = []
     csv_file = open(OUTPUT_CSV, "w", newline="", encoding="utf-8")
     writer = csv.DictWriter(csv_file, fieldnames=CSV_FIELDS)
@@ -168,9 +137,7 @@ def run(limit: int | None = None) -> None:
                 print(f"[{image_id}/{fact_type}] rag kontext fehlgeschlagen: {error}")
                 continue
 
-            # zwei durchlaeufe pro fakt: einmal mit rag kontext (wie in der echten app),
-            # einmal ohne (nur bild+frage) - der vergleich ist der eigentliche zweck
-            # dieses labs, nicht nur die einzelne trefferquote
+            # zwei durchlaeufe pro fakt, mit und ohne rag kontext
             for condition, condition_context in (
                 (CONDITION_WITH_CONTEXT, context),
                 (CONDITION_WITHOUT_CONTEXT, ""),

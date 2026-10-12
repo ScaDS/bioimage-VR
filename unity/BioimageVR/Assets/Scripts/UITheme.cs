@@ -4,10 +4,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // farben und formen fuer die vr oberflaeche, ein ort fuer alle stile
-    // laeuft zur laufzeit UND im editor, deshalb hier und nicht unter Editor/
-    // 30.09.: palette aus dem abgestimmten mockup, angelehnt an meta horizon os.
-    // grau fuer die oberflaeche, blau nur fuer aktionen, orange nur fuer bitte pruefen
+    // farben und formen der vr oberflaeche, grau fuer flaechen, blau fuer aktionen, orange fuer pruefen
     public static class UITheme
     {
         private static Color Rgb(int hex, float alpha = 1f) =>

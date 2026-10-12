@@ -2,8 +2,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // werte pro segmentierter zelle, index im array ist die label id
-    // luecken in den ids haben VoxelCount 0
+    // werte pro zelle, index ist die label id, luecken haben VoxelCount 0
     public struct CellInfo
     {
         public int Id;
@@ -113,8 +112,7 @@ namespace BioimageVR
         public static float EquivalentDiameter(CellInfo c, Vector3 voxelSize) =>
             Mathf.Pow(6f * Volume(c, voxelSize) / Mathf.PI, 1f / 3f);
 
-        // kurze zeile fuer schild und zellliste
-        // unit wie VolumeView.Unit, µm, mm oder px
+        // kurze zeile fuer schild und zellliste, unit wie VolumeView.Unit
         public static string Describe(CellInfo c, Vector3 voxelSize, string unit) =>
             $"{Units.Volume(Volume(c, voxelSize), unit)} · Ø {Units.Length(EquivalentDiameter(c, voxelSize), unit, "0.0")}";
     }

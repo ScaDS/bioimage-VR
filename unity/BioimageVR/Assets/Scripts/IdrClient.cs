@@ -7,8 +7,7 @@ using UnityEngine.Networking;
 
 namespace BioimageVR
 {
-    // ein eintrag einer idr_list antwort, alle drei ebenen (studien/datasets/bilder)
-    // liefern dasselbe {id,name,has_zarr} schema, siehe preprocessing/upload_server.py
+    // ein eintrag einer idr_list antwort, gleiches schema auf allen drei ebenen
     [Serializable]
     public class IdrItem
     {
@@ -16,15 +15,11 @@ namespace BioimageVR
         public string name;
         public bool has_zarr;
 
-        // welches bild als thumbnail-stellvertreter dient (bei studien/datasets ein
-        // anderes bild als die id selbst, bei einzelbildern == id), siehe
-        // upload_server.py _attach_previews. 0 wenn keins gefunden wurde
+        // bild das als vorschau dient, 0 wenn keins gefunden
         public int preview_image_id;
     }
 
-    // spricht mit dem lokalen preprocessing/upload_server.py im gleichen wlan - browsen
-    // (idr_list, gleicher endpunkt wie das desktop-tool nutzt) und direkt-download der
-    // fertigen .nii.gz (vr_idr_file, kein adb noetig, laeuft rein per http)
+    // spricht mit upload_server.py im gleichen wlan, browsen und direkter download
     public class IdrClient : MonoBehaviour
     {
         [Tooltip("wlan adresse von preprocessing/upload_server.py, siehe dessen konsolenausgabe beim start")]
@@ -37,10 +32,7 @@ namespace BioimageVR
         {
             public IdrItem[] items;
             public int total;
-            // naechster offset fuers "Mehr laden" - NICHT einfach offset+items.Length,
-            // weil level=images serverseitig auf has_zarr+3d gefiltert zurueckkommt
-            // (siehe upload_server.py _scan_usable_images), items.Length und die
-            // tatsaechlich gescannte rohe menge laufen da auseinander
+            // naechster offset kommt vom server, bilder sind dort gefiltert
             public int next_offset;
             public bool has_more;
             public string error;
@@ -106,8 +98,7 @@ namespace BioimageVR
                 yield break;
             }
 
-            // Application.persistentDataPath ist auf jeder plattform schon beschreibbar,
-            // anders als beim adb-push braucht es hier keine android-sonderbehandlung
+            // persistentDataPath ist ueberall beschreibbar
             string dir = Path.Combine(Application.persistentDataPath, "idr_downloads");
             Directory.CreateDirectory(dir);
             string path = Path.Combine(dir, $"idr_{imageId}.nii.gz");

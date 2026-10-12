@@ -4,8 +4,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // manueller test fuer vlmclient, nur tastatur - A-Taste ist jetzt der panel klick
-    // macht screenshot, feste frage, antwort in text
+    // manueller test fuer vlmclient, screenshot plus feste frage
     [RequireComponent(typeof(VLMClient))]
     public class VLMTestHarness : MonoBehaviour
     {

@@ -45,8 +45,7 @@ DEFAULT_ENV = Path(r"C:\Users\PC\totalseg-env")
 # darunter ist es kein koerperbild mehr, mm
 MIN_BODY_EXTENT = 50.0
 TASKS = {"mr": "total_mr", "ct": "total"}
-# zusatzmodelle je koerperregion, ausgeloest von einer struktur aus dem grundmodell
-# am mrt kopf geprueft 08.10.: headneck_bones_vessels findet nichts, deshalb nicht dabei
+# zusatzmodelle je koerperregion, headneck_bones_vessels fand am mrt kopf nichts
 DETAIL_TASKS = {"brain": ["head_glands_cavities", "head_muscles"]}
 DIRECTIONS = {"R": (1, 0, 0), "L": (-1, 0, 0), "A": (0, 1, 0), "P": (0, -1, 0), "S": (0, 0, 1), "I": (0, 0, -1)}
 
@@ -114,8 +113,7 @@ def read_voxel_size(metadata: dict) -> tuple[np.ndarray | None, str]:
 
 def segment_body(volume_path: Path, orientation: str | None = None, modality: str = "mr", fast: bool = False,
                  detail: bool = False, overwrite: bool = False) -> dict:
-    # grundmodell und auf wunsch die detailmodelle, schreibt maske und namen neben das volumen.
-    # gibt zurueck was gefunden wurde, wirft ValueError mit lesbarem grund wenn es nicht geht
+    # grundmodell und detailmodelle, schreibt maske und namen, ValueError mit lesbarem grund
     labels_path = labels_path_for(volume_path)
     if labels_path.exists() and not overwrite:
         raise ValueError(f"{labels_path} already exists. It may be a hand made segmentation, "

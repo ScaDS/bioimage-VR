@@ -5,10 +5,7 @@ using UnityEngine.SceneManagement;
 
 namespace BioimageVR
 {
-    // pointerposition und pointerrotation gibt es nur bei echten openxr controllern
-    // der xr interaction simulator hat nur deviceposition und devicerotation
-    // schaltet den trackedposedriver auf die passende bindung um je nachdem ob
-    // das XR Interaction Simulator objekt in der szene gerade aktiv ist
+    // bindung je nach echtem controller oder xr interaction simulator umschalten
     [RequireComponent(typeof(TrackedPoseDriver))]
     public class HandRayPointerFallback : MonoBehaviour
     {
@@ -39,8 +36,7 @@ namespace BioimageVR
 
         private void Update()
         {
-            // GameObject.Find uebergeht inaktive objekte, das simulator objekt ist aber
-            // meistens inaktiv (headset test) - deshalb ueber die root objekte suchen
+            // ueber die root objekte suchen, GameObject.Find uebergeht inaktive
             if (_simulator == null)
             {
                 foreach (var root in SceneManager.GetActiveScene().GetRootGameObjects())

@@ -5,8 +5,7 @@ using UnityEngine.Networking;
 
 namespace BioimageVR
 {
-    // holt rag kontext fuers gerade geladene bild vom lokalen preprocessing/upload_server.py
-    // gleiches muster wie IdrClient.cs, nur ein endpunkt der einen fertigen text liefert
+    // holt rag kontext fuers geladene bild vom upload_server.py
     public class RagClient : MonoBehaviour
     {
         [Tooltip("wlan adresse von preprocessing/upload_server.py, siehe dessen konsolenausgabe beim start")]

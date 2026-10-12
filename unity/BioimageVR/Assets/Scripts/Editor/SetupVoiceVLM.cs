@@ -7,8 +7,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR.EditorSetup
 {
-    // setup fuer voice vlm, haengt sttclient und voicevlmharness ans vlmtest objekt
-    // gleicher response text wie beim normalen vlm test, sicher erneut ausfuehrbar
+    // setup fuer voice vlm am vlmtest objekt, sicher erneut ausfuehrbar
     public static class SetupVoiceVLM
     {
         private const string ScenePath = "Assets/Scenes/Phase1.unity";
@@ -36,9 +35,7 @@ namespace BioimageVR.EditorSetup
             if (voiceHarness == null)
                 voiceHarness = go.AddComponent<VoiceVLMHarness>();
 
-            // dispatcher fuers tool-calling (siehe VLMToolDispatcher.cs, CHATMICROSCOPY.md
-            // 3.2) - bindet an die heute gebauten regler, damit gesprochene befehle wie
-            // "mach heller" die slider im panel direkt mitbewegen
+            // dispatcher fuers tool calling, gesprochene befehle bewegen die regler im panel
             VLMToolDispatcher toolDispatcher = go.GetComponent<VLMToolDispatcher>();
             if (toolDispatcher == null)
                 toolDispatcher = go.AddComponent<VLMToolDispatcher>();
@@ -48,9 +45,7 @@ namespace BioimageVR.EditorSetup
             dispatcherSo.FindProperty("renderControls").objectReferenceValue = Object.FindFirstObjectByType<VolumeRenderControls>();
             dispatcherSo.ApplyModifiedProperties();
 
-            // rag kontext fuers gerade geladene bild (siehe RagClient.cs, CHATMICROSCOPY.md
-            // rag umbau) - server adresse bleibt erhalten, dieses objekt wird hier nur
-            // gefunden/ergaenzt, nie zerstoert/neu gebaut wie das seitenpanel
+            // rag kontext fuers geladene bild, objekt wird nur ergaenzt, nie neu gebaut
             RagClient ragClient = go.GetComponent<RagClient>();
             if (ragClient == null)
                 ragClient = go.AddComponent<RagClient>();

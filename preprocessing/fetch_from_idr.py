@@ -34,8 +34,7 @@ from deploy_to_headset import DEFAULT_PACKAGE, check_single_device, ensure_api_k
 DATA_ROOT = Path(__file__).resolve().parent.parent / "data" / "idr"
 API_BASE = "https://idr.openmicroscopy.org"
 
-# reihenfolge testen, erste antwortende url gewinnt, idr hat je nach
-# studie unterschiedliche zarr versionen im bucket liegen
+# urls der reihe nach testen, idr hat je studie andere zarr versionen
 ZARR_URL_PATTERNS = [
     "https://uk1s3.embassy.ebi.ac.uk/idr/zarr/v0.4/{id}.zarr",
     "https://uk1s3.embassy.ebi.ac.uk/idr/zarr/v0.1/{id}.zarr",
@@ -43,7 +42,7 @@ ZARR_URL_PATTERNS = [
 
 
 def resolve_zarr_url(image_id: int) -> str:
-    """passende zarr url fuer die id finden, testet die patterns der reihe nach"""
+    # passende zarr url fuer die id finden, testet die patterns der reihe nach
     for pattern in ZARR_URL_PATTERNS:
         url = pattern.format(id=image_id)
         request = urllib.request.Request(f"{url}/.zattrs", method="HEAD")
@@ -62,11 +61,7 @@ def resolve_zarr_url(image_id: int) -> str:
 
 
 def has_zarr(image_id: int) -> bool:
-    """ob ein bild ueberhaupt ein ome-zarr volumen hat, ohne die url selbst zu brauchen -
-    fuers vorab-markieren in der browse-galerie. viele idr-bilder, v.a. aeltere studien,
-    wurden nie zu zarr konvertiert (siehe resolve_zarr_url) - ohne diese markierung
-    klickt man sich sonst quasi zufaellig durch fehlschlaege (bei einer stichprobe von
-    20 studien hatten nur 2 ueberhaupt zarr)"""
+    # hat das bild ein ome zarr volumen, viele aeltere studien nicht
     try:
         resolve_zarr_url(image_id)
         return True
@@ -75,19 +70,14 @@ def has_zarr(image_id: int) -> bool:
 
 
 def get_size_z(image_id: int) -> int | None:
-    """nur SizeZ eines bildes holen, ohne key value annotationen zu laden - leichter
-    als fetch_metadata(), fuers massenhafte pruefen in is_3d() beim durchblaettern"""
+    # nur SizeZ holen, leichter als fetch_metadata
     with urllib.request.urlopen(f"{API_BASE}/api/v0/m/images/{image_id}/", timeout=15) as response:
         image = json.load(response)["data"]
     return image.get("Pixels", {}).get("SizeZ")
 
 
 def is_3d(image_id: int) -> bool:
-    """ob ein bild ueberhaupt ein 3d stack ist (SizeZ>1) - sehr viele idr quellen sind
-    2d objekttraeger scans, fuer den vr volumen viewer ohnehin ungeeignet selbst wenn
-    sie zufaellig ein zarr volumen haetten (stichprobe 25.08.: 18 von 30 studien hatten
-    im ersten bild SizeZ>1, deutlich besser als die zarr trefferquote - trotzdem lohnt
-    sich das rausfiltern, siehe idr_list level=images in upload_server.py)"""
+    # 3d stack wenn SizeZ groesser 1, viele idr quellen sind 2d scans
     try:
         size_z = get_size_z(image_id)
         return bool(size_z and size_z > 1)
@@ -96,7 +86,7 @@ def is_3d(image_id: int) -> bool:
 
 
 def fetch_metadata(image_id: int) -> dict:
-    """bildinfo und key value annotationen von der idr api holen"""
+    # bildinfo und key value annotationen von der idr api holen
     with urllib.request.urlopen(f"{API_BASE}/api/v0/m/images/{image_id}/", timeout=15) as response:
         image = json.load(response)["data"]
 
@@ -138,7 +128,7 @@ def fetch_metadata(image_id: int) -> dict:
 
 
 def list_dataset_image_ids(dataset_id: int) -> list[int]:
-    """alle image ids in einem dataset holen, seitenweise"""
+    # alle image ids in einem dataset holen, seitenweise
     ids: list[int] = []
     offset = 0
     limit = 100
@@ -154,10 +144,7 @@ def list_dataset_image_ids(dataset_id: int) -> list[int]:
 
 
 def list_projects_page(offset: int = 0, limit: int = 40) -> tuple[list[dict], int]:
-    """eine seite der obersten ebene (alle idr studien) holen, fuers durchstoebern ganz
-    ohne vorher schon eine id zu kennen. idr hat aktuell ~150 studien, darum auch hier
-    bewusst paginiert statt alles auf einmal (gleiches prinzip wie die beiden funktionen
-    weiter unten, eine ebene tiefer)"""
+    # eine seite idr studien, bewusst paginiert
     url = f"{API_BASE}/api/v0/m/projects/?limit={limit}&offset={offset}"
     with urllib.request.urlopen(url, timeout=15) as response:
         payload = json.load(response)
@@ -166,8 +153,7 @@ def list_projects_page(offset: int = 0, limit: int = 40) -> tuple[list[dict], in
 
 
 def list_project_datasets_page(project_id: int, offset: int = 0, limit: int = 40) -> tuple[list[dict], int]:
-    """eine seite datasets (id+name) eines projekts/einer studie holen, analog zu
-    list_dataset_images_page eine ebene hoeher"""
+    # eine seite datasets eines projekts
     url = f"{API_BASE}/api/v0/m/projects/{project_id}/datasets/?limit={limit}&offset={offset}"
     with urllib.request.urlopen(url, timeout=15) as response:
         payload = json.load(response)
@@ -176,16 +162,13 @@ def list_project_datasets_page(project_id: int, offset: int = 0, limit: int = 40
 
 
 def first_dataset_image_id(dataset_id: int) -> int | None:
-    """erstes bild eines datasets, fuers vorschau-thumbnail auf der dataset-ebene beim
-    durchstoebern (siehe list_dataset_images_page) - None wenn das dataset leer ist"""
+    # erstes bild eines datasets fuers vorschaubild, None wenn leer
     images, _ = list_dataset_images_page(dataset_id, offset=0, limit=1)
     return images[0]["id"] if images else None
 
 
 def first_project_preview_image_id(project_id: int) -> int | None:
-    """erstes bild des ersten datasets eines projekts, fuers vorschau-thumbnail auf der
-    studien-ebene - zwei hops (erstes dataset, dann dessen erstes bild), None falls das
-    projekt keine datasets oder das erste dataset keine bilder hat"""
+    # erstes bild des ersten datasets fuers vorschaubild der studie
     datasets, _ = list_project_datasets_page(project_id, offset=0, limit=1)
     if not datasets:
         return None
@@ -193,11 +176,7 @@ def first_project_preview_image_id(project_id: int) -> int | None:
 
 
 def list_dataset_images_page(dataset_id: int, offset: int = 0, limit: int = 40) -> tuple[list[dict], int]:
-    """eine seite bilder (id+name) eines datasets holen, fuers browsen/scrollen im
-    upload-tool. anders als list_dataset_image_ids (holt alles auf einmal, fuer den
-    massen-fetch per --dataset) holt das hier bewusst immer nur eine seite - auch ein
-    dataset mit tausenden bildern bleibt so browsbar ohne alles auf einmal laden zu
-    muessen. gibt zusaetzlich die gesamtzahl zurueck (fuers "mehr laden")"""
+    # eine seite bilder eines datasets plus gesamtzahl
     url = f"{API_BASE}/api/v0/m/datasets/{dataset_id}/images/?limit={limit}&offset={offset}"
     with urllib.request.urlopen(url, timeout=15) as response:
         payload = json.load(response)
@@ -206,7 +185,7 @@ def list_dataset_images_page(dataset_id: int, offset: int = 0, limit: int = 40) 
 
 
 def list_project_dataset_ids(project_id: int) -> list[int]:
-    """alle dataset ids in einem projekt (studie) holen, seitenweise"""
+    # alle dataset ids in einem projekt (studie) holen, seitenweise
     ids: list[int] = []
     offset = 0
     limit = 100
@@ -222,11 +201,7 @@ def list_project_dataset_ids(project_id: int) -> list[int]:
 
 
 def _save_thumbnail(volume, path: Path) -> None:
-    """mittlerer z-schnitt als schnelle vorschau (siehe Punkt 4 der wunschliste,
-    STATUS.md 25.08.) - zeigt ungefaehr wie das volumen im viewer aussehen wird, weil es
-    dieselben schon entrauschten/kontrast-gestreckten daten nutzt statt idrs eigenes
-    thumbnail (andere darstellung/ohne unsere pipeline). rgb (z,y,x,3) und graustufen
-    (z,y,x) beide direkt speicherbar, kein extra umbau noetig"""
+    # mittlerer z schnitt als vorschau aus den schon gestreckten daten
     import imageio.v3 as iio
 
     mid_z = volume.shape[0] // 2
@@ -234,15 +209,12 @@ def _save_thumbnail(volume, path: Path) -> None:
 
 
 def thumbnail_path_for(volume_path: Path) -> Path:
-    """vorschau-pfad aus dem volumen-pfad ableiten (<name>_thumbnail.jpg statt fix
-    'thumbnail.jpg') - kollisionsfrei falls mehrere volumen mal im selben ordner landen,
-    z.b. beim adb push aufs geraet (siehe deploy_to_headset.push_to_device, das alles
-    flach in persistentDataPath ablegt statt in eigenen unterordnern wie lokal)"""
+    # <name>_thumbnail.jpg, kollisionsfrei wenn alles flach in einem ordner liegt
     return volume_path.with_name(f"{volume_path.stem.removesuffix('.nii')}_thumbnail.jpg")
 
 
 def fetch_one(image_id: int, name: str | None = None, denoise: bool = True, max_voxels: int = MAX_VOXELS) -> Path:
-    """ein bild laden und konvertieren, gibt den pfad des volumens zurueck"""
+    # ein bild laden und konvertieren, gibt den pfad des volumens zurueck
     name = name or f"idr_{image_id}"
     out_dir = DATA_ROOT / str(image_id)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -275,11 +247,7 @@ def push_one(volume_path: Path, package: str) -> None:
     if thumbnail_path.is_file():
         push_to_device(adb, thumbnail_path, package)
 
-    # metadata.json liegt lokal einmal pro idr-bild-ordner (siehe fetch_one), auf dem
-    # geraet landet aber alles flach im selben verzeichnis (siehe push_to_device) - mit
-    # umbenennung pushen, sonst wuerden mehrere bilder sich die eine datei teilen bzw.
-    # gegenseitig ueberschreiben. gleiches namensschema wie thumbnail_path_for, siehe
-    # VolumeMetadataPanel.cs auf der unity seite
+    # metadata.json umbenannt pushen, auf dem geraet liegt alles flach
     metadata_path = volume_path.with_name("metadata.json")
     if metadata_path.is_file():
         remote_name = f"{volume_path.stem.removesuffix('.nii')}_metadata.json"

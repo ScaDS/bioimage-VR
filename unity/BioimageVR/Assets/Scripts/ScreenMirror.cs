@@ -9,19 +9,12 @@ using UnityEngine.XR.Interaction.Toolkit.UI;
 
 namespace BioimageVR
 {
-    // bildschirm modus, zeigt das napari fenster vom pc als leinwand links neben dem volumen
-    // geht ohne den echten monitor im blick, maus und tastatur bleiben am pc
-    // napari schickt sein fenster an den server solange die brille es haben will, hier nur abholen
-    // der mauszeiger ist schon ins bild gemalt
-    // der controller strahl auf dem bild wirkt wie die maus: zeigen bewegt, trigger ist die linke taste
-    // leiste darunter: groesse der leinwand hier, und groesse des fensters auf dem pc.
-    // ein kleines fenster ist in der brille besser lesbar und kommt schneller an
+    // bildschirm modus, napari fenster als leinwand links vom volumen, controller strahl ist die maus
     public class ScreenMirror : MonoBehaviour
     {
         private const float CanvasScale = 0.00085f;
         private const float ScreenWidth = 1700f;
-        // ein fensterbild dieser breite fuellt ScreenWidth, breitere machen die leinwand breiter.
-        // so bleibt ein bildpunkt gleich gross und die schrift lesbar
+        // ein fensterbild dieser breite fuellt ScreenWidth, breitere machen die leinwand breiter
         private const float ReferencePixels = 1536f;
         private const float MinWidthFactor = 0.6f;
         private const float MaxWidthFactor = 1.7f;
@@ -62,8 +55,7 @@ namespace BioimageVR
         public long WindowSeq { get; private set; }
 
         public bool Active { get; private set; }
-        // von hier aus gilt die ansicht solange die leinwand an ist. der kopf dreht sich zum
-        // fenster und zurueck, das soll napari nicht mitziehen, nur was am volumen passiert
+        // fester standpunkt solange die leinwand an ist, kopfdrehen soll napari nicht mitziehen
         public Vector3 ViewPoint { get; private set; }
         // kommt gerade nichts, laeuft napari nicht oder das plugin fenster ist zu
         public bool Receiving => Active && Time.time - lastFrameTime < 3f;
@@ -237,8 +229,7 @@ namespace BioimageVR
                     yield return new WaitForSeconds(1f);
                     continue;
                 }
-                // textur handler entpackt das jpeg neben dem hauptthread, sonst ruckelt jedes bild
-                // der server antwortet sobald ein neues bild da ist, so gibt es keine wartezeit dazwischen
+                // jpeg neben dem hauptthread entpacken, server antwortet sobald ein neues bild da ist
                 bool failed;
                 string wait = WaitSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 using (UnityWebRequest request = UnityWebRequestTexture.GetTexture($"{url}/vr/screen?after={seq}&wait={wait}", true))

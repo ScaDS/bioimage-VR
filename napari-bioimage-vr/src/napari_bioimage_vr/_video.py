@@ -1,10 +1,4 @@
-# live video aus der brille, variante A.
-#
-# die quest gibt ihr display per adb screenrecord als h264 strom aus, hier dekodiert.
-# braucht usb kabel (oder adb ueber wlan), die app auf der brille muss nichts tun.
-# das display liefert beide augen nebeneinander, 4128x2208 auf der quest 3, wir schneiden aus.
-# schwarz solange die brille nicht getragen wird, dann gibt die quest kein bild aus.
-# bei stehendem bild schickt die quest kaum neue frames, die rate steigt sobald sich was bewegt
+# live video aus der brille ueber adb screenrecord, schwarz solange sie nicht getragen wird
 
 from __future__ import annotations
 
@@ -49,12 +43,7 @@ def crop_eye(frame: np.ndarray, eye: str) -> np.ndarray:
 
 
 class Flattener:
-    # macht aus einem linsenverzerrten augenbild ein flaches bild.
-    #
-    # das display bekommt die bilder so vorverzerrt, dass sie durch die linse gerade wirken.
-    # hier radial zurueckgerechnet, r_quelle = r * (1 + strength * r^2) / zoom, r normiert
-    # auf die halbe bildbreite. genaues linsenmodell der quest ist nicht bekannt, deshalb
-    # regler im plugin statt fester werte. tabellen werden nur bei neuer groesse neu gebaut
+    # linsenverzerrtes augenbild flach rechnen, linsenmodell unbekannt, deshalb regler
 
     def __init__(self, strength: float = 0.25, zoom: float = 1.3, center_x: float = 0.0,
                  rotation_deg: float = 10.0):
@@ -68,8 +57,7 @@ class Flattener:
         self._right: Flattener | None = None
 
     def right(self) -> "Flattener":
-        # fuers rechte auge, linsen sitzen spiegelbildlich zur nase. einmal gebaut und
-        # gemerkt, sonst waeren die tabellen bei jedem bild neu zu rechnen
+        # tabellen fuers rechte auge, gespiegelt und einmal gebaut
         if self._right is None:
             self._right = Flattener(self.strength, self.zoom, -self.center_x, -self.rotation_deg)
         return self._right
@@ -81,8 +69,7 @@ class Flattener:
         ys, xs = np.mgrid[0:height, 0:width].astype(np.float32)
         u = (xs - (width - 1) / 2) / half
         v = (ys - cy) / half
-        # ausgabe im uhrzeigersinn drehen heisst quelle gegen den uhrzeigersinn abtasten,
-        # bildkoordinaten mit y nach unten
+        # ausgabe im uhrzeigersinn drehen heisst quelle gegen den uhrzeigersinn abtasten
         angle = np.radians(self.rotation_deg)
         u, v = u * np.cos(angle) + v * np.sin(angle), -u * np.sin(angle) + v * np.cos(angle)
         factor = (1 + self.strength * (u * u + v * v)) / self.zoom
@@ -106,8 +93,7 @@ class Flattener:
 
 
 def flatten_eyes(frame: np.ndarray, eye: str, flattener: Flattener) -> np.ndarray:
-    # bei beiden augen jedes fuer sich entzerren, sonst waere die mitte die naht.
-    # rechtes auge gespiegelt, siehe Flattener.right
+    # beide augen einzeln entzerren, sonst waere die mitte die naht
     if eye == "links":
         return flattener.apply(frame)
     if eye == "rechts":
@@ -123,11 +109,7 @@ def explain_error(message: str) -> str:
 
 
 class VideoStream:
-    # screenrecord auf der brille, dekodiert zu rgb bildern.
-    #
-    # frames() ist ein generator fuer einen hintergrund thread, stop() kommt vom ui thread
-    # und beendet sofort, auch wenn gerade kein bild kommt (stehendes oder schwarzes bild).
-    # fehler kommen als str statt exception, napari verwirft exceptions aus workern sonst teils
+    # screenrecord zu rgb bildern, fehler als str weil napari exceptions aus workern verwirft
 
     def __init__(self, eye: str = "links", adb: str | None = None):
         self.eye = eye

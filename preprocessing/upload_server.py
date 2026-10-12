@@ -1,26 +1,4 @@
-# lokaler web-upload: bild per browser (handy/laptop im gleichen wlan) hochladen ODER
-# direkt ein bild aus dem idr datensatz laden, automatisch konvertieren und aufs per usb
-# verbundene quest pushen.
-#
-# duenne schicht ueber convert_to_volume.convert(), fetch_from_idr.fetch_one() und den
-# push-helfern aus deploy_to_headset.py - kein neuer konvertierungs-/push-code, nur die
-# uebertragung vom user-geraet zu diesem rechner (bzw. das idr-abholen ohne kommandozeile)
-# kommt neu dazu (der rest lief vorher schon nur per kommandozeile/lokaler datei).
-#
-# einschraenkung: nur einzeldateien (tif, czi, lsm, png-stapel als eine datei etc.) -
-# kein ordner-upload, deshalb funktioniert z.b. eine ome-zarr url weiterhin nur ueber
-# convert_to_volume.py/fetch_from_idr.py direkt, nicht ueber dieses formular.
-#
-# ist kein quest per usb verbunden (push schlaegt fehl), oeffnet sich das ergebnis
-# stattdessen automatisch in MRIcroGL (falls installiert) zur schnellen sichtkontrolle
-# ohne brille - siehe open_in_mricrogl().
-#
-# usage:
-# python upload_server.py
-# (zeigt die lokale wlan-adresse an, z.b. http://192.168.1.23:8000)
-#
-# kein auth-schutz - fuer den vertrauten lokalen wlan-gebrauch gedacht, nicht fuers
-# oeffentliche internet.
+# lokaler web upload oder idr bild, konvertieren und aufs quest pushen, kein auth schutz
 
 from __future__ import annotations
 
@@ -470,8 +448,7 @@ def index() -> str:
 
 
 def push_or_open(output_path: Path) -> dict:
-    # gemeinsame push-oder-mricrogl-fallback logik, egal ob die datei per upload oder
-    # per idr-fetch entstanden ist
+    # pushen, sonst in mricrogl oeffnen
     result = {}
     try:
         adb = find_adb()
@@ -480,10 +457,7 @@ def push_or_open(output_path: Path) -> dict:
         ensure_api_key_pushed(adb, DEFAULT_PACKAGE)
         result["pushed"] = True
     except Exception as error:
-        # konvertierung/idr-download war trotzdem erfolgreich, nur der push (z.b. kein
-        # quest per usb verbunden) hat nicht geklappt - kein grund die ganze anfrage
-        # fehlschlagen zu lassen. stattdessen zur schnellen sichtkontrolle in mricrogl
-        # oeffnen (siehe docstring oben)
+        # push fehlgeschlagen ist kein fehler der anfrage, dann mricrogl
         result["pushed"] = False
         result["push_error"] = str(error)
         try:
@@ -496,12 +470,7 @@ def push_or_open(output_path: Path) -> dict:
 
 
 def _safe_stem(raw: str) -> str:
-    # dateiname-baustein von einem client saeubern, bevor er in einen serverseitigen
-    # pfad einfliesst - wichtig sobald die studie laeuft und beliebige teilnehmergeraete
-    # das formular ausfuellen (Punkt 15 der wunschliste, STATUS.md 25.08.). Path(...).name
-    # verwirft jedes verzeichnis-praefix (auch ../../), der rest wird auf harmlose
-    # zeichen eingedampft - sonst koennte ein praeparierter dateiname/name-feld ausserhalb
-    # von SAMPLE_DIR schreiben oder bestehende dateien ueberschreiben
+    # dateinamen vom client saeubern, darf nicht aus SAMPLE_DIR herausfuehren
     name_only = Path(raw).name
     cleaned = re.sub(r"[^\w.-]", "_", name_only).strip("._")
     return cleaned[:80] or "upload"
@@ -512,8 +481,7 @@ def upload(file: UploadFile = File(...), name: str = Form(None)) -> JSONResponse
     stem = _safe_stem(name or Path(file.filename).stem or "upload")
     output_path = SAMPLE_DIR / f"{stem}.nii.gz"
     if output_path.exists():
-        # zwei teilnehmer mit gleich benanntem file (z.b. beide "image.tif" vom handy)
-        # sollen sich nicht gegenseitig ueberschreiben
+        # gleich benannte uploads sollen sich nicht ueberschreiben
         output_path = SAMPLE_DIR / f"{stem}_{uuid.uuid4().hex[:6]}.nii.gz"
 
     # original-endung behalten, bioio erkennt das format meist daran
@@ -538,9 +506,7 @@ def upload(file: UploadFile = File(...), name: str = Form(None)) -> JSONResponse
 
 
 def list_local_idr() -> list[dict]:
-    # bereits lokal heruntergeladene idr-bilder auflisten (siehe fetch_from_idr.DATA_ROOT),
-    # anzeigename aus metadata.json falls vorhanden (wie VolumeLibrary.cs es in der app macht),
-    # sonst nur der ordnername (= idr bild-id)
+    # lokal vorhandene idr bilder, anzeigename aus metadata.json
     entries = []
     if not IDR_DATA_ROOT.is_dir():
         return entries
@@ -569,14 +535,7 @@ def idr_local() -> JSONResponse:
 
 
 def _attach_previews(items: list[dict], resolve) -> None:
-    # jedes item bekommt preview_image_id (welches bild als thumbnail dient) UND
-    # has_zarr (ob dieses vorschau-bild ueberhaupt ein ome-zarr volumen hat), beides im
-    # selben parallelen durchlauf - sonst wuerde eine seite mit 40 eintraegen 40x
-    # nacheinander auf idr warten muessen. viele aeltere idr-studien wurden nie zu zarr
-    # konvertiert (siehe fetch_from_idr.has_zarr) - ohne diese markierung klickt man sich
-    # sonst quasi zufaellig durch fehlschlaege beim tatsaechlichen laden. ein einzelner
-    # fehlgeschlagener lookup (leeres dataset/projekt, timeout) liefert einfach
-    # None/False statt die ganze seite scheitern zu lassen
+    # preview_image_id und has_zarr je item parallel holen, fehler geben None
     def resolve_one(item_id: int) -> tuple[int | None, bool]:
         try:
             preview_id = resolve(item_id)
@@ -594,15 +553,7 @@ def _attach_previews(items: list[dict], resolve) -> None:
 
 
 def _scan_usable_images(dataset_id: int, start_offset: int, limit: int) -> tuple[list[dict], int, int, bool]:
-    # wie list_dataset_images_page, aber ueberspringt bilder ohne zarr-volumen UND ohne
-    # echten 3d-stack (SizeZ<=1) - die grosse mehrheit der 2d-objekttraeger-scans soll erst
-    # gar nicht mehr in der galerie auftauchen (vorher nur abgedunkelt mit badge). scannt
-    # dafuer notfalls mehrere rohe seiten hintereinander bis 'limit' brauchbare bilder
-    # zusammen sind oder das dataset zuende ist. offset/total bleiben in der ROHEN
-    # (ungefilterten) indexzaehlung, next_offset sagt dem client wo die naechste 'Mehr
-    # laden'-anfrage weitermachen soll - kann nicht einfach offset+len(items) sein, weil
-    # gefilterte items die zaehlung sonst durcheinanderbringen wuerden (client wuerde
-    # sonst dieselben rohen bilder mehrfach anfragen bzw. welche ueberspringen)
+    # bilder ohne zarr oder ohne 3d stack ueberspringen, offset zaehlt roh, next_offset fuer den client
     usable: list[dict] = []
     offset = start_offset
     raw_total = 0
@@ -642,17 +593,7 @@ def idr_list(
     offset: int = 0,
     limit: int = 40,
 ) -> JSONResponse:
-    # einheitlicher endpunkt fuer alle drei durchstoeber-ebenen (studien -> datasets ->
-    # bilder), damit das frontend nicht drei fast identische loader braucht und man clean
-    # von den obersten idr-studien bis zum einzelnen bild durchklicken kann, ohne vorher
-    # irgendeine id kennen zu muessen. jedes item bekommt ein preview_image_id (siehe
-    # _attach_previews) - der browser laedt das thumbnail dann direkt von idr selbst
-    # (siehe PAGE, <img src> ist nicht von cors betroffen, kein bild-proxy noetig).
-    #
-    # 'next_offset'/'has_more' statt nur 'total' im ergebnis, weil level=images gefiltert
-    # zurueckkommt (siehe _scan_usable_images) - offset und anzahl zurueckgegebener items
-    # laufen dort auseinander. bei projects/datasets (ungefiltert) ist next_offset einfach
-    # offset+len(items), identisch zum alten client-seitigen offset += items.Count
+    # ein endpunkt fuer studien, datasets und bilder, next_offset weil bilder gefiltert kommen
     try:
         if level == "projects":
             items, total = list_projects_page(offset=offset, limit=limit)
@@ -679,9 +620,7 @@ def idr_list(
 
 @app.post("/idr_fetch")
 def idr_fetch(image_id: str = Form(""), existing_path: str = Form("")) -> JSONResponse:
-    # entweder ein schon lokal vorhandenes idr-bild erneut verwenden (existing_path,
-    # aus /idr_local) oder ein neues per id von idr laden (image_id, ruft fetch_one auf -
-    # das gleiche was fetch_from_idr.py auf der kommandozeile macht)
+    # lokales idr bild wiederverwenden oder neu per id laden
     if existing_path:
         output_path = Path(existing_path)
         try:
@@ -703,8 +642,7 @@ def idr_fetch(image_id: str = Form(""), existing_path: str = Form("")) -> JSONRe
     else:
         return JSONResponse({"converted": False, "error": "IDR Bild-ID eingeben oder ein lokales Bild waehlen."}, status_code=400)
 
-    # nur den header lesen (nib.load ist lazy), fuers shape-anzeigen im formular -
-    # kein grund die vollen daten nochmal zu laden, das passiert schon in convert()/fetch_one()
+    # nur den header lesen fuer die shape anzeige
     shape = list(nib.load(str(output_path)).shape)
 
     result = {"converted": True, "output": str(output_path), "shape": shape}
@@ -714,11 +652,7 @@ def idr_fetch(image_id: str = Form(""), existing_path: str = Form("")) -> JSONRe
 
 @app.get("/vr_idr_file", response_model=None)
 def vr_idr_file(image_id: int):
-    # direkter download fuer die VR app selbst (siehe unity IdrClient.cs) - kein
-    # adb push/mricrogl-fallback, die app laedt die fertige .nii.gz per http direkt
-    # aufs headset statt ueber diesen rechner-browser zu gehen. nutzt den lokalen
-    # cache falls das bild schon frueher geladen wurde (gleiches muster wie
-    # idr_local/existing_path), sonst frisch per fetch_one()
+    # direkter download fuer die vr app, lokaler cache zuerst
     cached_path = IDR_DATA_ROOT / str(image_id) / f"idr_{image_id}.nii.gz"
     if cached_path.is_file():
         output_path = cached_path
@@ -733,11 +667,7 @@ def vr_idr_file(image_id: int):
 
 @app.get("/rag_query")
 def rag_query(question: str, current_image_id: int) -> JSONResponse:
-    # rag kontext fuers gerade in der app geladene bild (siehe unity RagClient.cs) -
-    # zwei abrufe: gefiltert auf current_image_id (welcher teil seiner eigenen metadaten
-    # passt zur frage) und ungefiltert ueber den ganzen index (findet automatisch
-    # aehnliche chunks aus anderen bildern, z.b. gleiche faerbung). baut daraus einen
-    # fertigen text zum voranstellen an den vlm prompt, siehe VLMClient.cs context param
+    # rag kontext fuers geladene bild, einmal gefiltert aufs bild und einmal ueber den ganzen index
     try:
         own_hits = rag_query_index(question, n_results=4, source_id=current_image_id)
         other_hits = rag_query_index(question, n_results=4)
@@ -758,8 +688,7 @@ def rag_query(question: str, current_image_id: int) -> JSONResponse:
 
 
 def find_mricrogl() -> Path | None:
-    # sucht MRIcroGL.exe an ein paar ueblichen stellen (offizieller installer legt es
-    # unter Program Files ab, die haeufige zip-variante landet direkt in Downloads)
+    # MRIcroGL.exe an den ueblichen stellen suchen
     candidates = [
         Path.home() / "Downloads" / "MRIcroGL_windows" / "MRIcroGL" / "MRIcroGL.exe",
         Path(r"C:\Program Files\MRIcroGL\MRIcroGL.exe"),
@@ -774,10 +703,7 @@ def find_mricrogl() -> Path | None:
 
 
 def open_in_mricrogl(nifti_path: Path) -> None:
-    # oeffnet die datei direkt im 3d-render-view (nicht der 2d-slice-standardansicht) -
-    # ueber ein generiertes python-scriptlet, das ist MRIcroGLs eigener scripting-mechanismus
-    # (gl.loadimage + gl.view(64) fuers rendering, siehe PYTHON.md/COMMANDS.md im MRIcroGL
-    # repo). MRIcroGL bleibt offen, kein subprocess.run/warten - reine GUI-app
+    # datei im 3d render view oeffnen ueber ein python scriptlet, mricrogl bleibt offen
     exe = find_mricrogl()
     if exe is None:
         raise FileNotFoundError("MRIcroGL.exe nicht gefunden (uebliche Speicherorte geprueft).")

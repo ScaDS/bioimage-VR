@@ -4,10 +4,7 @@ using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 namespace BioimageVR
 {
-    // zoomt durch skalieren, mausrad am desktop, rechter thumbstick am controller
-    // wartet auf volumeview load event, sonst ist basescale noch falsch
-    // pausiert wenn der rechte strahl gerade aufs panel zeigt, dann scrollt der stick da
-    // im fly modus pausiert es ganz, dort skaliert VolumeFly ueber ScaleAround
+    // zoomt durch skalieren, mausrad oder rechter stick, pausiert am panel und im fly modus
     [RequireComponent(typeof(VolumeView))]
     public class VolumeZoom : MonoBehaviour
     {
@@ -16,8 +13,7 @@ namespace BioimageVR
         [SerializeField] private float controllerDeadzone = 0.15f;
         [SerializeField] private float minScaleMultiplier = 0.2f;
         [SerializeField] private float maxScaleMultiplier = 20f;
-        // zum reinfliegen deutlich groesser, ein nasengang ist nur ein paar voxel breit
-        // 06.10.: 100 reichte an der engsten stelle im mrt nicht, 1.5 mm auf 0.7 m braucht ca. 120
+        // zum reinfliegen deutlich groesser, 1.5 mm auf 0.7 m braucht ca. 120
         [SerializeField] private float flyMaxScaleMultiplier = 300f;
         [SerializeField] private XRRayInteractor rightHandRay;
 

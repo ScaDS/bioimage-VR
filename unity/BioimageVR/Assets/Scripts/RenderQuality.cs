@@ -4,11 +4,7 @@ using UnityEngine.XR;
 
 namespace BioimageVR
 {
-    // renderaufloesung, schaerfung und foveated rendering, umschaltbar im display tab
-    // metas dynamische aufloesung darf nur zwischen min und max schwanken, min nie unter 1.0
-    // 30.09.: vorher bis 0.7 erlaubt, beim segmentierungsbild sprang es auf 0.8 und alles
-    // wurde koernig inkl. schrift. last faengt jetzt VolumeStepGovernor im volumen ab
-    // metas schaerfung (quality) laeuft im compositor und ist fast umsonst, deshalb immer an
+    // renderaufloesung, schaerfung und foveated rendering, dynamische aufloesung nie unter 1.0
     public class RenderQuality : MonoBehaviour
     {
         public enum Level { Standard, Sharp }

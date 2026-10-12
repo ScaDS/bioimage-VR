@@ -1,6 +1,4 @@
-"""embeddings ueber die scads.ai gateway, gleicher api key wie ueberall sonst im projekt
-kein lokales modell, siehe plan fuer die begruendung
-"""
+# embeddings ueber die scads.ai gateway, kein lokales modell
 
 from __future__ import annotations
 
@@ -22,7 +20,7 @@ def _api_key() -> str:
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    """ein embedding pro text, gleiche reihenfolge wie die eingabe, ein einziger request"""
+    # ein embedding pro text, gleiche reihenfolge wie die eingabe, ein einziger request
     if not texts:
         return []
 

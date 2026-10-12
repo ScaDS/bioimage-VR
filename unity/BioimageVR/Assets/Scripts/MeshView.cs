@@ -3,9 +3,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // laedt ein .ply mesh (siehe PlyMeshLoader), zentriert und normalisiert es -
-    // gleiches prinzip wie VolumeView.cs beim volumen: rohe koordinaten bleiben
-    // rohe koordinaten in der datei, unity macht die normalisierung beim laden
+    // laedt ein ply mesh, zentriert und normalisiert es
     [RequireComponent(typeof(MeshFilter))]
     [RequireComponent(typeof(MeshRenderer))]
     public class MeshView : MonoBehaviour
@@ -41,8 +39,7 @@ namespace BioimageVR
                 return;
             }
 
-            // um den ursprung zentrieren - rohe connectomics koordinaten (z.b. nanometer
-            // bei microns-explorer.org daten) liegen sonst weit ausserhalb der szene
+            // um den ursprung zentrieren, rohe koordinaten liegen weit ausserhalb der szene
             Vector3 center = mesh.bounds.center;
             Vector3[] vertices = mesh.vertices;
             for (int i = 0; i < vertices.Length; i++)
@@ -50,8 +47,7 @@ namespace BioimageVR
             mesh.vertices = vertices;
             mesh.RecalculateBounds();
 
-            // laengste dimension auf 1 unity-einheit normalisieren, gleiches prinzip wie
-            // VolumeView.cs's physicalSize/maxDimension
+            // laengste dimension auf 1 unity einheit
             Vector3 size = mesh.bounds.size;
             float maxDimension = Mathf.Max(size.x, size.y, size.z);
             if (maxDimension <= 0f) maxDimension = 1f;

@@ -5,9 +5,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // bausteine fuer die ganze oberflaeche, abgestimmtes mockup vom 30.09.
-    // wird im editor setup UND zur laufzeit fuer listen benutzt, damit alles gleich aussieht
-    // masse in canvas einheiten, alle vr canvases laufen mit 0.00085 m pro einheit
+    // bausteine fuer die oberflaeche, masse in canvas einheiten mit 0.00085 m pro einheit
     public static class UIKit
     {
         public enum ButtonStyle { Primary, Secondary, Borderless, Destructive, Selected }
@@ -90,8 +88,7 @@ namespace BioimageVR
             return go.GetComponent<RectTransform>();
         }
 
-        // stapel mit hintergrund, groesse folgt dem inhalt
-        // fit false wenn ein layout drumherum die groesse bestimmt, sonst warnt unity
+        // stapel mit hintergrund, fit false wenn ein layout drumherum die groesse bestimmt
         public static RectTransform Surface(Transform parent, string name, bool vertical, Color color, float radius,
             RectOffset padding, float spacing = Gap, TextAnchor align = TextAnchor.UpperLeft, bool fit = true)
         {

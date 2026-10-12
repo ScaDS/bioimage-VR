@@ -1,20 +1,4 @@
-# flugweg durch einen hohlraum im volumen, z.b. nase bis luftroehre.
-#
-# alles unter dem threshold ist luft, pro luftvoxel der abstand zur naechsten wand
-# der weg ist der guenstigste von start nach ziel, nah an der wand ist teuer, dadurch
-# bleibt er mittig im gang. allgemein fuer jedes bild mit hohlraeumen, nichts koerperspezifisches
-#
-# start und ziel in voxeln (x,y,z) wie in der nifti datei, sie rasten auf die
-# freieste luftstelle in der naehe ein, grob geschaetzt reicht also
-#
-# stationen kommen aus der form des wegs, ohne anatomie wissen: eingang aus der freien luft,
-# engstellen und scharfe kurven. namen dafuer kann spaeter ein modell oder das vlm vergeben
-#
-# ausgabe <volumen stem>_flypath.json neben dem volumen, dazu ein kontrollbild
-#
-# usage:
-# python find_fly_path.py volume.nii.gz --start 8,225,119 --end 150,312,124
-# python find_fly_path.py volume.nii.gz --start 8,225,119 --end 150,312,124 --threshold 0.12
+# flugweg durch einen hohlraum, guenstigster weg mit teurer wandnaehe, ausgabe <stem>_flypath.json
 
 from __future__ import annotations
 
@@ -120,8 +104,7 @@ def _distance_to_border(point: np.ndarray, direction: np.ndarray, shape: tuple[i
 
 
 def extend_outside(points: np.ndarray, shape: tuple[int, ...], spacing: float = SPACING_VOXELS) -> np.ndarray:
-    # ein ende nah am bildrand gerade weiterfuehren bis ausserhalb des bilds.
-    # ein angeschnittener gang, z.b. die luftroehre am unteren bildrand, endet sonst mitten im koerper
+    # ende nah am bildrand gerade bis ausserhalb des bilds weiterfuehren
     def tail(end: np.ndarray, before: np.ndarray) -> np.ndarray:
         direction = end - before
         length = np.linalg.norm(direction)

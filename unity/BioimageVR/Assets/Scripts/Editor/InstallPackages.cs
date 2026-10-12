@@ -5,8 +5,7 @@ using UnityEngine;
 
 namespace BioimageVR.EditorSetup
 {
-    // installiert phase 1 packages ueber die package manager api
-    // nicht selbst quit aufrufen, laeuft async und beendet sich selbst
+    // phase 1 packages installieren, laeuft async und beendet sich selbst
     public static class InstallPackages
     {
         private static AddAndRemoveRequest _request;

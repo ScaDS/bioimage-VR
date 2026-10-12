@@ -63,8 +63,7 @@ def match_volume_layout(mask_zyx: np.ndarray, volume_shape: tuple[int, ...]) -> 
 
 
 def resize_labels_nearest(mask: np.ndarray, target_shape: tuple[int, ...]) -> np.ndarray:
-    # labels auf eine andere groesse bringen, nearest neighbor ueber indizes statt
-    # interpolation, ids bleiben exakt. fuer verkleinerte volumen und den weg zurueck
+    # labels auf andere groesse, nearest neighbor ueber indizes, ids bleiben exakt
     if mask.shape == tuple(target_shape):
         return mask
     indices = [
@@ -75,8 +74,7 @@ def resize_labels_nearest(mask: np.ndarray, target_shape: tuple[int, ...]) -> np
 
 
 def write_labels_array(mask_zyx: np.ndarray, volume_path: Path) -> Path:
-    # schon geladene maske (z,y,x) neben das volumen schreiben, gleiche regeln wie
-    # convert_labels, z.b. fuer labels layer aus napari
+    # schon geladene maske (z,y,x) neben das volumen schreiben, regeln wie convert_labels
     if not np.issubdtype(mask_zyx.dtype, np.integer):
         raise ValueError(f"Label mask must be integer typed, got {mask_zyx.dtype}")
     if mask_zyx.min() < 0 or mask_zyx.max() > 65535:

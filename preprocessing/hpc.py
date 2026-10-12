@@ -110,8 +110,7 @@ def wait_for(job_id: str, timeout: float = 3600, poll: float = 15, report=print)
 
 
 def volume_to_czyx(volume_path: Path) -> np.ndarray:
-    # konvertiertes volumen (x,y,z) bzw. (x,y,z,3) nach (c,z,y,x), leere kanaele fallen weg.
-    # die maske passt dadurch voxelgenau auf das was die brille zeigt
+    # volumen nach (c,z,y,x), leere kanaele weg, maske passt voxelgenau zur brille
     data = np.asanyarray(nib.load(str(volume_path)).dataobj)
     if data.dtype.names:
         data = np.stack([data[name] for name in data.dtype.names], axis=-1)
@@ -137,9 +136,7 @@ ANISOTROPY_FROM = 1.5
 
 
 def cellpose_anisotropy(volume_path: Path) -> float | None:
-    # anisotropie nur weitergeben wenn sie deutlich ist.
-    # blastozyste 08.10. (z zu xy 1.39): ohne 62 von 63 kernen getroffen, mit 61, kein gewinn.
-    # staerker gestauchte stapel sind noch nicht geprueft
+    # anisotropie nur weitergeben wenn deutlich, blastozyste 08.10. brachte keinen gewinn
     value = anisotropy_for(volume_path)
     return value if value and value >= ANISOTROPY_FROM else None
 

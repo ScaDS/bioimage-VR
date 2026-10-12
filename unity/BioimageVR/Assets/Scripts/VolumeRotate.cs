@@ -4,10 +4,7 @@ using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 namespace BioimageVR
 {
-    // volumen frei drehen, linker thumbstick, sonst tut der gerade nichts
-    // x achse gibt yaw, y achse gibt pitch, beides weltraum um den eigenen mittelpunkt
-    // pausiert wenn der linke strahl gerade aufs panel zeigt, gleiches muster wie VolumeZoom
-    // im fly modus ebenfalls, dann gehoert der stick VolumeFly
+    // volumen drehen mit dem linken stick, pausiert am panel und im fly modus
     [RequireComponent(typeof(VolumeView))]
     public class VolumeRotate : MonoBehaviour
     {

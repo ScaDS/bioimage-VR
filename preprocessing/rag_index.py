@@ -1,9 +1,4 @@
-"""duenner chromadb wrapper
-
-immer explizite embeddings uebergeben (embed_texts aus rag_embeddings.py), nie
-documents-only add oder query_texts - sonst zieht chromadb sein eigenes lokales
-default embedding modell als versteckte abhaengigkeit rein
-"""
+# duenner chromadb wrapper, immer eigene embeddings uebergeben
 
 from __future__ import annotations
 
@@ -28,8 +23,7 @@ def get_collection():
 
 
 def upsert_chunks(chunks: list[dict]) -> None:
-    """chunks kommen aus einem adapter (siehe idr_adapter.py), jeweils
-    id/source_db/source_id/field_type/text - id-basiert, gefahrlos erneut aufrufbar"""
+    # chunks aus einem adapter, upsert ueber id
     if not chunks:
         return
 
@@ -50,9 +44,7 @@ def upsert_chunks(chunks: list[dict]) -> None:
 
 
 def query(text: str, n_results: int = 5, source_id: str | int | None = None) -> list[dict]:
-    """naechste treffer zuerst, jeweils id/text/metadata/distance
-    source_id gesetzt: nur chunks dieses einen bildes (chromadb where filter)
-    source_id None: ungefiltert ueber den ganzen index"""
+    # naechste treffer zuerst, source_id filtert auf ein bild
     where = {"source_id": str(source_id)} if source_id is not None else None
     [embedding] = embed_texts([text])
 

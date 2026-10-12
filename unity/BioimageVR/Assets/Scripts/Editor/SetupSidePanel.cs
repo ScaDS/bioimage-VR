@@ -17,11 +17,7 @@ using UnityEngine.XR.Interaction.Toolkit.UI;
 
 namespace BioimageVR.EditorSetup
 {
-    // richtet die ganze oberflaeche ein, abgestimmtes mockup vom 30.09.
-    // werkzeuge und karte am volumen (VolumeToolsUI), seitenpanel mit tabs (SidePanelController),
-    // massstab und achsen die dem kopf traege folgen. die inhalte bauen die komponenten zur
-    // laufzeit selbst, hier kommen nur huelle, strahlen und verweise dazu
-    // menu: BioimageVR Setup Side Panel
+    // richtet die oberflaeche ein, nur huelle, strahlen und verweise, inhalte bauen die komponenten
     public static class SetupSidePanel
     {
         private const string ScenePath = "Assets/Scenes/Phase1.unity";
@@ -137,8 +133,7 @@ namespace BioimageVR.EditorSetup
 
         // szene grundlagen
 
-        // ohne das blockiert UnityWebRequest jedes http://, IdrClient und VrBridge sprechen
-        // aber bewusst klartext mit dem lokalen upload_server.py
+        // klartext http erlauben, IdrClient und VrBridge sprechen mit dem lokalen upload_server.py
         private static void AllowInsecureHttp()
         {
             if (PlayerSettings.insecureHttpOption == InsecureHttpOption.AlwaysAllowed) return;
@@ -157,11 +152,7 @@ namespace BioimageVR.EditorSetup
             module.enableJoystickInput = false;
         }
 
-        // reste aelterer setups, alte getrennte panels und das kamera hud mit ecken icons
-        // "Canvas" ist der alte test canvas mit schnittbild vorschau und vlm antworttext
-        // der phase 2 test setzt sonst bei jedem bild eine rote testkugel ins volumen,
-        // ganzes objekt aus weil er in Awake arbeitet, das laeuft auch bei abgeschalteter
-        // komponente. im inspector wieder anschaltbar
+        // reste aelterer setups abschalten, ganzes objekt weil der phase 2 test in Awake arbeitet
         private static void RemoveStale()
         {
             foreach (string name in new[] { "ChatCanvas", "GalleryCanvas", "HudCanvas", "ScaleBarHud", "AxisGizmo", "HudStrip", "Canvas" })
@@ -173,8 +164,7 @@ namespace BioimageVR.EditorSetup
             if (markerDemo != null) markerDemo.gameObject.SetActive(false);
         }
 
-        // ein knopf fuer alles wie ein mausklick: primaerknopf klickt ui, gehalten auf der griffleiste
-        // verschiebt er das panel. stick scrollt das scrollrect unter dem strahl
+        // primaerknopf klickt ui und verschiebt an der griffleiste, stick scrollt
         private static XRRayInteractor EnsureHandRay(string rayName, string handTag)
         {
             var rayGO = GameObject.Find(rayName);
@@ -337,8 +327,7 @@ namespace BioimageVR.EditorSetup
             return controller;
         }
 
-        // greifzone nur ueber der griffleiste oben, sonst kollidiert greifen mit klicken im panel
-        // groesse folgt SidePanelController.OpenDragBarHeight, zugeklappt vergroessert er sie selbst
+        // greifzone nur ueber der griffleiste, sonst kollidiert greifen mit klicken
         private static BoxCollider MakeGrabbable(GameObject canvasGO)
         {
             var grab = canvasGO.AddComponent<XRGrabInteractable>();

@@ -2,8 +2,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // folgt dem kopf traege statt starr, fuer massstab und achsen
-    // bleibt stehen solange man nur kurz zur seite schaut, holt erst ab einem winkel auf
+    // folgt dem kopf traege, holt erst ab einem winkel auf
     public class LazyFollow : MonoBehaviour
     {
         [SerializeField] private Vector3 offset = new Vector3(-0.28f, -0.34f, 0.9f);

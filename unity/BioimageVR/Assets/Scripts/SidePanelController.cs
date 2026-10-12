@@ -7,10 +7,7 @@ using UnityEngine.XR.Interaction.Toolkit.Interactables;
 
 namespace BioimageVR
 {
-    // seitenpanel mit tabs Images, Cells, Display, Chat, abgestimmtes mockup vom 30.09.
-    // baut seinen inhalt beim start selbst mit UIKit und reicht die teile an die komponenten
-    // auf demselben objekt weiter, das setup legt nur die huelle und die verweise an
-    // griffleiste oben zum verschieben, dreht sich waehrend des greifens zur kamera
+    // seitenpanel mit tabs Images, Cells, Display, Chat, baut seinen inhalt beim start selbst
     public class SidePanelController : MonoBehaviour
     {
         // einzige quelle fuer die hoehe der griffleiste, geschlossen groesser, sonst zu duenn zum treffen
@@ -88,8 +85,7 @@ namespace BioimageVR
 
         private void Build()
         {
-            // reste eines aelteren panel aufbaus weg, sonst liegen alter und neuer stil uebereinander
-            // greifzone und haltepunkt kommen vom setup und bleiben
+            // reste eines aelteren panel aufbaus weg, greifzone und haltepunkt bleiben
             for (int i = transform.childCount - 1; i >= 0; i--)
             {
                 Transform child = transform.GetChild(i);

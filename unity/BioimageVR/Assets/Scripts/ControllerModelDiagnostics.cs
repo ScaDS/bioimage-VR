@@ -2,10 +2,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // temporaeres debug-log fuer die OVRRuntimeController-kette (OVRManager init,
-    // controller verbunden?, render model pfade verfuegbar?) - braucht keine
-    // szenen-verkabelung, haengt sich beim start selbst ein. wieder entfernen sobald
-    // die echten controller-modelle bestaetigt funktionieren
+    // temporaeres debug log fuer die OVRRuntimeController kette, spaeter entfernen
     public static class ControllerModelDiagnosticsBootstrap
     {
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]

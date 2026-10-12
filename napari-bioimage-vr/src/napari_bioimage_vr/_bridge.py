@@ -1,6 +1,4 @@
-# logik ohne napari und qt, einzeln testbar.
-#
-# gegenstueck zu preprocessing/vr_bridge.py auf dem server und VrBridge.cs in der app
+# logik ohne napari und qt, gegenstueck zu vr_bridge.py und VrBridge.cs
 
 from __future__ import annotations
 
@@ -38,14 +36,12 @@ def _http() -> requests.Session:
 
 
 def _url(server: str) -> str:
-    # localhost durch 127.0.0.1 ersetzen. windows probiert sonst erst ipv6 und wartet 2 s
-    # pro anfrage, der server hoert nur auf ipv4
+    # localhost als 127.0.0.1, windows probiert sonst erst ipv6 und wartet 2 s
     return re.sub(r"//localhost(?=[:/]|$)", "//127.0.0.1", server.rstrip("/"))
 
 
 def to_czyx(array: np.ndarray, rgb: bool = False) -> np.ndarray:
-    # ein layer als (c,z,y,x). rgb kanaele liegen hinten, 2d wird zu z=1,
-    # mehr als 4 achsen (z.b. zeit) auf den ersten index reduziert
+    # ein layer als (c,z,y,x), rgb hinten, 2d wird z=1, zeit auf ersten index
     array = np.asarray(array)
     if rgb:
         array = np.moveaxis(array[..., :3], -1, 0)
@@ -132,8 +128,7 @@ def can_start_server(server: str) -> bool:
 
 
 def _server_pythons() -> list[str]:
-    # der server braucht fastapi und co, die liegen oft nicht in der napari umgebung.
-    # erst die eigene probieren, dann das python aus dem die umgebung gebaut ist
+    # server pythons, erst die eigene umgebung, dann das python aus dem sie gebaut ist
     base = Path(sys.base_prefix) / ("python.exe" if os.name == "nt" else "bin/python3")
     candidates = [os.environ.get("BIOIMAGE_VR_SERVER_PYTHON"), sys.executable, str(base)]
     found = []
@@ -144,8 +139,7 @@ def _server_pythons() -> list[str]:
 
 
 def start_server(server: str, wait_s: float = 90.0) -> None:
-    # upload_server.py im hintergrund starten und warten bis er antwortet.
-    # laeuft ohne fenster, ausgabe in SERVER_LOG, endet mit napari
+    # upload_server.py im hintergrund starten und warten bis er antwortet, log in SERVER_LOG
     for python in _server_pythons():
         with open(SERVER_LOG, "ab") as log:
             process = subprocess.Popen(
@@ -178,8 +172,7 @@ def post_napari_view(server: str, view: dict) -> None:
 
 
 def camera_to_view(view_direction, up_direction, shape_zyx, scale_zyx) -> dict:
-    # gegenstueck zu view_to_camera, richtungen der napari kamera in den volumen raum.
-    # nur die richtung, abstand und groesse bleiben in der brille wie sie sind
+    # gegenstueck zu view_to_camera, nur die richtung der napari kamera im volumen raum
     extent = np.asarray(shape_zyx, dtype=np.float64) * np.asarray(scale_zyx, dtype=np.float64)
 
     def to_cube(direction) -> dict:
@@ -245,11 +238,7 @@ def _vec(d: dict) -> np.ndarray:
 
 def view_to_camera(view: dict, shape_zyx, scale_zyx, translate_zyx,
                    canvas_px: float, fov_deg: float, object_centric: bool = False) -> CameraState:
-    # blick aus der brille auf eine napari kamera fuer denselben layer.
-    #
-    # die app schickt alles im volumen raum, wuerfel von -0.5 bis 0.5 je achse. das ist
-    # unabhaengig von zoom und drehung in vr und von einer verkleinerung beim senden.
-    # uvw 0 und 1 sind die aeusseren voxelkanten, napari setzt voxel i auf i * scale
+    # blick der brille als napari kamera, volumen raum ist der wuerfel von -0.5 bis 0.5
     shape = np.asarray(shape_zyx, dtype=np.float64)
     scale = np.asarray(scale_zyx, dtype=np.float64)
     translate = np.asarray(translate_zyx, dtype=np.float64)
@@ -259,8 +248,7 @@ def view_to_camera(view: dict, shape_zyx, scale_zyx, translate_zyx,
     position = translate + ((cube + 0.5) * shape - 0.5) * scale
     volume_center = translate + (shape - 1) / 2 * scale
 
-    # von aussen zaehlt von wo man aufs objekt schaut, nicht wohin der kopf zeigt. sonst
-    # verschwindet es aus napari beim blick auf den bildschirm. objekt mittig, zoom bleibt
+    # von aussen zaehlt der standort, nicht die kopfrichtung, objekt bleibt mittig
     if object_centric and np.max(np.abs(cube)) > 0.5:
         forward = volume_center - position
         forward /= np.linalg.norm(forward)

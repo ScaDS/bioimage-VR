@@ -1,9 +1,4 @@
-# fenster von napari als bild, fuer den bildschirm modus der brille.
-#
-# bisher nur windows. die fenster zeichnen sich ueber PrintWindow selbst in eine bitmap, also
-# kommt nur napari ins bild, auch wenn ein anderes programm davor liegt. menues, auswahllisten
-# und dialoge sind eigene fenster und werden an ihrer stelle drauf gesetzt.
-# laeuft im eigenen thread, die aufrufe ueber ctypes geben das gil frei, napari bleibt fluessig
+# napari fenster als jpeg ueber PrintWindow, nur windows, eigener thread
 
 from __future__ import annotations
 
@@ -16,8 +11,7 @@ from ctypes import wintypes
 from PIL import Image, ImageDraw
 
 AVAILABLE = sys.platform == "win32"
-# breiter wird verkleinert, sonst entpackt die brille zu lange. die leinwand in der brille
-# waechst mit der breite mit, so bleibt die schrift auch bei grossem fenster lesbar
+# breiter wird verkleinert, sonst entpackt die brille zu lange
 MAX_WIDTH = 2560
 JPEG_QUALITY = 75
 # mauszeiger gehoert nicht zum fensterinhalt, also selbst einzeichnen. pfeil in pixeln bei 1280 breite
@@ -116,8 +110,7 @@ def _other_windows(main: int) -> list[int]:
 
 
 def grab(hwnd: int, pointer: tuple[float, float] | None = None) -> bytes | None:
-    # inhalt des fensters samt menues und mauszeiger als jpeg, None wenn es minimiert ist.
-    # pointer ist der zeiger aus der brille als anteil von breite und hoehe, sonst zaehlt die echte maus
+    # fenster samt menues und zeiger als jpeg, None wenn minimiert, pointer ersetzt die echte maus
     if _user32.IsIconic(hwnd):
         return None
     rect = wintypes.RECT()

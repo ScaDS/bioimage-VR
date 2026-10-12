@@ -4,9 +4,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // abschnitt segmentation im display tab, labels an aus plus farbstaerke
-    // nur sichtbar wenn zum aktuellen bild eine _labels datei geladen wurde
-    // anzeige kommt vom SidePanelController
+    // abschnitt segmentation im display tab, nur mit geladener _labels datei
     public class SegmentationControls : MonoBehaviour
     {
         [SerializeField] private VolumeView volumeView;

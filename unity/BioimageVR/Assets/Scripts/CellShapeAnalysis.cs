@@ -4,8 +4,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // hinweis ob eine segmentierte zelle eher zwei ineinandergepresste zellen ist
-    // und wo man sie teilen wuerde
+    // hinweis ob eine zelle eher zwei ineinandergepresste ist und wo man teilt
     public struct SplitHint
     {
         public bool Found;
@@ -26,11 +25,7 @@ namespace BioimageVR
             : $"{(Likely ? "Probably" : "Possibly")} 2 cells · {Score * 100f:0} % neck";
     }
 
-    // distanztransformation in um pro zelle, gipfel darin sind blob mitten, auf der
-    // verbindungslinie zweier gipfel die engstelle messen. schmale engstelle im verhaeltnis
-    // zu den radien heisst einschnuerung wie bei zwei ineinandergepressten kernen,
-    // eine einzelne auch laengliche zelle hat keine. kalibriert am 30.09. an synthetischen
-    // kugeln und ellipsoiden und an B1_C1 (2 von 63 markiert, beide nur moeglicherweise)
+    // distanztransformation je zelle, schmale engstelle zwischen zwei gipfeln heisst einschnuerung
     public static class CellShapeAnalysis
     {
         public const float NeckRatio = 0.75f;
@@ -38,8 +33,7 @@ namespace BioimageVR
         private const float MinPeakFraction = 0.5f;
         private const int MaxPeaks = 40;
         private const int MinVoxels = 200;
-        // gross aber endlich, dann braucht die parabel rechnung keine sonderfaelle
-        // jede zeile hat durch den rand mindestens ein hintergrund voxel
+        // gross aber endlich, parabel rechnung braucht dann keine sonderfaelle
         private const float Inside = 1e20f;
 
         public static SplitHint[] AnalyzeAll(NiftiVolumeLoader.Volume vol)
@@ -161,8 +155,7 @@ namespace BioimageVR
             return Mathf.Lerp(Mathf.Lerp(c00, c10, fy), Mathf.Lerp(c01, c11, fy), fz);
         }
 
-        // quadrierter euklidischer abstand zum hintergrund, felzenszwalb huttenlocher,
-        // achse fuer achse mit der voxelgroesse als gewicht. hintergrund 0, innen maxvalue
+        // quadrierter abstand zum hintergrund nach felzenszwalb huttenlocher, voxelgroesse als gewicht
         private static void SquaredDistance(float[] f, int nx, int ny, int nz, Vector3 spacing)
         {
             int longest = Math.Max(nx, Math.Max(ny, nz));

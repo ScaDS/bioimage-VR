@@ -6,8 +6,7 @@ using UnityEngine;
 
 namespace BioimageVR
 {
-    // laedt nii volumen, setzt es aufs material fuer den shader
-    // LoadVolume kann auch spaeter nochmal aufgerufen werden, fuer die galerie
+    // laedt nii volumen und setzt es aufs material, LoadVolume auch spaeter aufrufbar
     [RequireComponent(typeof(MeshRenderer))]
     public class VolumeView : MonoBehaviour
     {
@@ -20,16 +19,14 @@ namespace BioimageVR
         // false wenn kein metadata.json, dann ist VoxelSize nur pixdim ohne echte einheit
         public bool HasPhysicalVoxelSize { get; private set; }
 
-        // einheit von VoxelSize und damit aller messwerte, µm fuer mikroskopie, mm z.b. fuer mrt
-        // "px" wenn die datei keine voxelgroesse mitbringt
+        // einheit von VoxelSize, µm, mm oder px ohne voxelgroesse
         public string Unit => HasPhysicalVoxelSize ? unit : "px";
         private string unit = "µm";
 
         // true wenn eine <name>_labels.nii.gz mitgeladen wurde
         public bool HasLabels => LoadedVolume?.Labels != null;
 
-        // namen je id aus <name>_labels_names.json, z.b. organe von segment_anatomy.py
-        // ohne die datei sind es zellen und heissen nach ihrer nummer
+        // namen je id aus <name>_labels_names.json, sonst heissen zellen nach ihrer nummer
         public bool HasLabelNames => labelNames != null && labelNames.Count > 0;
         private Dictionary<int, string> labelNames;
 
@@ -188,8 +185,7 @@ namespace BioimageVR
             CellVisibilityChanged?.Invoke();
         }
 
-        // erster sichtbarer voxel mit label ungleich 0 entlang des strahls
-        // unabhaengig vom threshold, ausgeblendete zellen werden durchschaut
+        // erster sichtbarer voxel mit label entlang des strahls, ausgeblendete zellen durchschaut
         public bool TryPickCell(Ray worldRay, out int id, out Vector3 hitLocal)
         {
             id = 0;
@@ -277,18 +273,14 @@ namespace BioimageVR
         private static readonly int LampPosId = Shader.PropertyToID("_LampPosWS");
         private static readonly int LampRangeId = Shader.PropertyToID("_LampRange");
 
-        // shader-defaults aus VolumeRaymarch.shader, gleiche werte hier fest verdrahtet -
-        // jedes volumen bekommt seinen eigenen kontrast/threshold schon beim konvertieren
-        // (perzentil-streckung), diese regler sollen also bei jedem bild gleich starten
-        // statt vom vorher geladenen bild uebernommen zu werden
+        // shader defaults fest verdrahtet, jedes bild startet mit denselben reglern
         private const float DefaultDensity = 1.0f;
         private const float DefaultThreshold = 0.12f;
         private const float DefaultThresholdMax = 1.0f;
         private const float DefaultRenderMode = 0f;
         private const float DefaultEnableShading = 1f;
 
-        // im editor voller windows pfad, auf android geht das nicht
-        // dort denselben dateinamen aus persistentDataPath nehmen
+        // im editor voller pfad, auf android derselbe dateiname aus persistentDataPath
         private static string ResolvePlatformPath(string rawPath)
         {
 #if UNITY_ANDROID && !UNITY_EDITOR
@@ -304,16 +296,13 @@ namespace BioimageVR
         {
             // haelt die bildrate ueber die schrittweite statt ueber die aufloesung
             if (GetComponent<VolumeStepGovernor>() == null) gameObject.AddComponent<VolumeStepGovernor>();
-            // der wuerfel bringt einen collider mit den nichts braucht, der controller strahl
-            // endet sonst an der wuerfelwand statt am panel dahinter
+            // collider des wuerfels weg, der strahl endet sonst an der wuerfelwand
             Collider box = GetComponent<Collider>();
             if (box != null) Destroy(box);
             if (!string.IsNullOrEmpty(VolumeFilePath)) LoadVolume(VolumeFilePath);
         }
 
-        // kopflampe fuer den surface modus, sitzt mittig zwischen den augen
-        // reichweite in metern im raum, dadurch passt der abfall bei jeder vergroesserung
-        // drinnen kurz, gaenge werden nach hinten dunkel, von aussen reicht sie bis ans volumen
+        // kopflampe fuer den surface modus, reichweite in metern im raum
         [SerializeField] private float lampRangeInside = 0.6f;
         private MeshRenderer lampRenderer;
 
@@ -334,8 +323,7 @@ namespace BioimageVR
             mat.SetFloat(LampRangeId, lampRangeInside + 1.5f * outside);
         }
 
-        // zaehlt hoch bei jedem LoadVolume aufruf, eine spaeter ueberholte antwort
-        // (schneller doppelklick in der galerie) erkennt sich daran und wird verworfen
+        // zaehlt je LoadVolume hoch, ueberholte antworten erkennen sich daran
         private int loadToken;
 
         public async void LoadVolume(string rawPath)
@@ -349,9 +337,7 @@ namespace BioimageVR
             string resolvedPath = ResolvePlatformPath(rawPath);
             int myToken = ++loadToken;
 
-            // dekomprimieren/parsen ist reine cpu arbeit und kostet bei grossen dateien
-            // spuerbar zeit, deshalb auf einen background thread ausgelagert, damit der
-            // hauptthread (und damit frame/xr compositor) dabei nicht einfriert
+            // parsen im background thread, sonst friert der hauptthread ein
             NiftiVolumeLoader.RawVolumeData data;
             NiftiVolumeLoader.RawLabelData labelData = null;
             CellInfo[] cells = null;
@@ -375,8 +361,7 @@ namespace BioimageVR
                 return;
             }
 
-            // waehrend des wartens wurde ein neueres volumen angefordert, diese
-            // antwort ist ueberholt
+            // inzwischen ein neueres volumen angefordert, antwort ueberholt
             if (myToken != loadToken) return;
 
             // texture3d bauen muss auf dem hauptthread laufen (unity api)
@@ -391,10 +376,7 @@ namespace BioimageVR
                 volume.Cells = cells;
             }
 
-            // nifti pixdim ist aktuell immer 1,1,1 (siehe convert_to_volume.py, identitaets
-            // affine) - die echte, von idr gemessene voxelgroesse liegt stattdessen im
-            // metadata.json neben der datei. ohne das waere jeder wuerfel faelschlich
-            // isotrop, und massstab/messtool haetten keine echte grundlage
+            // voxelgroesse aus metadata.json, nifti pixdim ist immer 1,1,1
             Vector3? voxelSize = TryReadVoxelSizeFromMetadata(resolvedPath, out string voxelUnit);
             if (voxelSize.HasValue) volume.VoxelSize = voxelSize.Value;
             HasPhysicalVoxelSize = voxelSize.HasValue;
@@ -415,14 +397,11 @@ namespace BioimageVR
                 volume.BrickTexture.width, volume.BrickTexture.height, volume.BrickTexture.depth, NiftiVolumeLoader.BrickSize));
             meshRenderer.material.SetFloat(IsColorId, volume.IsColor ? 1f : 0f);
             meshRenderer.material.SetFloat(IsLiveChannelsId, volume.IsLiveChannels ? 1f : 0f);
-            // frisch geladenes volumen startet mit allen kanaelen an, sonst bleibt ein
-            // "kanal aus" von einem vorherigen volumen faelschlich haengen
+            // neues volumen startet mit allen kanaelen an
             meshRenderer.material.SetFloat(Channel0OnId, 1f);
             meshRenderer.material.SetFloat(Channel1OnId, 1f);
             meshRenderer.material.SetFloat(Channel2OnId, 1f);
-            // sonst haengen threshold/density/etc vom zuletzt geladenen bild noch dran -
-            // jedes bild ist eigenstaendig perzentil-gestreckt, braucht also dieselben
-            // startwerte, nicht die von einem anderen bild feinjustierten
+            // regler auf startwerte, nicht die vom vorigen bild
             meshRenderer.material.SetFloat(DensityId, DefaultDensity);
             meshRenderer.material.SetFloat(ThresholdId, DefaultThreshold);
             meshRenderer.material.SetFloat(ThresholdMaxId, DefaultThresholdMax);
@@ -440,8 +419,7 @@ namespace BioimageVR
             if (hasLabels) ResetVisibility(meshRenderer.material);
             meshRenderer.material.SetVector(VolumeTexelSizeId,
                 new Vector4(1.5f / volume.SizeX, 1.5f / volume.SizeY, 1.5f / volume.SizeZ, 0f));
-            // fuer SampleVoxelCubic (tricubic filterung), echte texelanzahl statt
-            // der 1.5x-skalierten VolumeTexelSize
+            // echte texelanzahl fuer SampleVoxelCubic
             meshRenderer.material.SetVector(VolumeSizeId,
                 new Vector4(volume.SizeX, volume.SizeY, volume.SizeZ, 0f));
 
@@ -481,8 +459,7 @@ namespace BioimageVR
             material.SetTexture(LabelVisTexId, visibilityTexture);
         }
 
-        // <name>_labels.nii.gz im selben ordner, siehe preprocessing/convert_labels.py
-        // falsche groesse nur warnen, bild laedt trotzdem
+        // <name>_labels.nii.gz im selben ordner, falsche groesse nur warnen
         private static NiftiVolumeLoader.RawLabelData TryParseLabels(string volumePath, NiftiVolumeLoader.RawVolumeData volume)
         {
             string dir = Path.GetDirectoryName(volumePath) ?? "";
@@ -549,9 +526,7 @@ namespace BioimageVR
 
         private static bool Valid(Vec v) => v != null && v.x > 0 && v.y > 0 && v.z > 0;
 
-        // <name>_metadata.json zuerst (android, flach im persistentDataPath gepusht),
-        // sonst metadata.json im selben ordner (editor/standalone, ein ordner pro bild) -
-        // gleiches schema wie VolumeMetadataPanel.Refresh
+        // <name>_metadata.json zuerst, sonst metadata.json im selben ordner
         private static Vector3? TryReadVoxelSizeFromMetadata(string volumePath, out string unit)
         {
             unit = "µm";

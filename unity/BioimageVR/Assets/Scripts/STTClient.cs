@@ -73,8 +73,7 @@ namespace BioimageVR
             return string.Empty;
         }
 
-        // clip zu 16bit pcm wav, mono durch mitteln der kanaele
-        // samplerate im header, muss nicht exakt 16khz sein
+        // clip zu 16bit pcm wav, mono durch mitteln
         private static byte[] WavEncode(AudioClip clip)
         {
             float[] samples = new float[clip.samples * clip.channels];

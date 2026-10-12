@@ -1,10 +1,4 @@
-"""rohe key_values (freie metadaten-annotationen, feldnamen variieren je quelle/studie)
-per llm den FIELD_* kategorien aus rag_schema.py zuordnen, statt fester kandidaten-keys
-pro quelle wie es idr_adapter.py vorher gemacht hat
-
-ein call pro bild beim indexbau (offline, unkritisch fuer latenz), nie zur query-zeit -
-macht adapter fuer neue quellen mit komplett anderen feldnamen quellenunabhaengig
-"""
+# key_values per llm den FIELD kategorien zuordnen, ein call pro bild beim indexbau
 
 from __future__ import annotations
 
@@ -19,8 +13,7 @@ API_URL = "https://llm.scads.ai/v1/chat/completions"
 MODEL = "alias-ha"
 API_KEY_FILENAME = ".scadsai-api-key"
 
-# resolution kommt strukturiert aus den pixeldaten (siehe idr_adapter._resolution_text),
-# key_values enthalten das so gut wie nie - dem llm gar nicht erst anbieten
+# resolution kommt aus den pixeldaten, dem llm nicht anbieten
 KEY_VALUE_FIELD_TYPES = {k: v for k, v in FIELD_DESCRIPTIONS.items() if k != FIELD_RESOLUTION}
 
 SYSTEM_PROMPT = (
@@ -56,8 +49,7 @@ def _api_key() -> str:
 
 
 def _extract_json_list(content: str) -> list:
-    """manche modelle wickeln die antwort in markdown-codefences oder ein
-    {"chunks": [...]} objekt statt direkt die liste zu liefern - beides abfangen"""
+    # markdown codefences und {"chunks": [...]} huelle abfangen
     text = content.strip()
     if text.startswith("```"):
         text = text.split("```")[1]
@@ -71,8 +63,7 @@ def _extract_json_list(content: str) -> list:
 
 
 def classify_key_values(key_values: dict) -> list[dict]:
-    """key_values -> liste von {"field_type", "text"}, leere liste falls nichts passt
-    oder key_values leer ist"""
+    # key_values zu liste von field_type und text, leer wenn nichts passt
     if not key_values:
         return []
 
