@@ -44,9 +44,9 @@ An AI-enhanced virtual reality framework for interactive bioimage exploration.
       <br>
       <strong>Microscopy image</strong>
       <br>
-      <a href="https://doi.org/10.5281/zenodo.18373993">test et al. (2026)</a>
+      <a href="https://doi.org/10.17867/10000125">Blin et al. (2019)</a>
       <br>
-      <a href="https://creativecommons.org/licenses/by/4.0/">License to add</a>
+      <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>
       <br>&nbsp;
     </td>
     <td width="33.33%" align="center" valign="top">
@@ -54,9 +54,9 @@ An AI-enhanced virtual reality framework for interactive bioimage exploration.
       <br>
       <strong>Microscopy image</strong>
       <br>
-      <a href="https://doi.org/10.5281/zenodo.18373993">test et al. (2026)</a>
+      <a href="https://doi.org/10.5281/zenodo.1837399">Sieverts & Acevedo (2024)</a>
       <br>
-      <a href="https://creativecommons.org/licenses/by/4.0/">License to add</a>
+      <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>
       <br>&nbsp;
     </td>
     <td width="33.33%" align="center" valign="top">
@@ -64,9 +64,9 @@ An AI-enhanced virtual reality framework for interactive bioimage exploration.
       <br>
       <strong>Microscopy image</strong>
       <br>
-      <a href="https://doi.org/10.5281/zenodo.18373993">test et al. (2026)</a>
+      <a href="https://doi.org/10.5281/zenodo.5816199">Winfree & El-Achkar (2022)</a>
       <br>
-      <a href="https://creativecommons.org/licenses/by/4.0/">License to add</a>
+      <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>
       <br>&nbsp;
     </td>
   </tr>
