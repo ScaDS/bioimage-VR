@@ -48,6 +48,8 @@ namespace BioimageVR
             // gewuenschte groesse des napari fensters, 1 klein bis 3 gross, windowSeq zaehlt je knopfdruck
             public int windowSize;
             public long windowSeq;
+            // offene bildanfrage des sprachmodells, 0 wenn keine
+            public long shotSeq;
         }
 
         // antwort auf den view post, napari schickt richtungen im selben volumen raum zurueck
@@ -78,6 +80,9 @@ namespace BioimageVR
 
         private long appliedNapariSeq;
         private long appliedCamSeq;
+        // so lange nach dem druecken der sprechtaste darf napari fuer sein bild brauchen
+        private const float ShotSeconds = 3f;
+        private long shotRequest;
         // in napari gemalte ausschnitte der maske, welche schon eingesetzt sind
         private long appliedPatchSeq;
         // frisch geladenes bild faengt beim stand des servers an, aeltere ausschnitte gehoeren nicht dazu
@@ -304,6 +309,29 @@ namespace BioimageVR
             done?.Invoke(request.result == UnityWebRequest.Result.Success ? null : request.error);
         }
 
+        // napari canvas fuers sprachmodell mit dem label unter der maus dort, null wenn napari nicht rechtzeitig antwortet
+        public IEnumerator NapariShot(Action<Texture2D, int> done)
+        {
+            Texture2D shot = null;
+            int pointing = 0;
+            long seq = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            shotRequest = seq;
+            float until = Time.time + ShotSeconds;
+            // napari sieht die anfrage erst mit dem naechsten blick, der server wartet je anfrage bis zu 2 s
+            while (shot == null && Time.time < until && !string.IsNullOrEmpty(BaseUrl) && volumeView.LoadedVolume != null)
+            {
+                using UnityWebRequest request = UnityWebRequestTexture.GetTexture($"{BaseUrl}/vr/shot?seq={seq}&wait=2");
+                request.timeout = 4;
+                yield return request.SendWebRequest();
+                if (request.result != UnityWebRequest.Result.Success) break;
+                if (request.responseCode != 200) continue;
+                shot = DownloadHandlerTexture.GetContent(request);
+                int.TryParse(request.GetResponseHeader("X-Pointing"), out pointing);
+            }
+            if (shotRequest == seq) shotRequest = 0;
+            done(shot, pointing);
+        }
+
         private IEnumerator ViewLoop()
         {
             while (true)
@@ -477,6 +505,7 @@ namespace BioimageVR
                 screenWanted = Mirror != null && Mirror.Active,
                 windowSize = Mirror != null ? Mirror.WindowSize : 0,
                 windowSeq = Mirror != null ? Mirror.WindowSeq : 0,
+                shotSeq = shotRequest,
             };
         }
     }

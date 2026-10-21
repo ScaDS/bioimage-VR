@@ -42,6 +42,9 @@ _screen_changed = threading.Condition(_lock)
 _pointer: dict = {"seq": 0, "items": []}
 _pointer_changed = threading.Condition(_lock)
 POINTER_KEEP = 500
+# napari bild ohne knoepfe fuers sprachmodell, seq ist die anfrage der brille, pointing das label unter der maus
+_shot: dict = {"seq": 0, "jpeg": b"", "pointing": 0}
+_shot_changed = threading.Condition(_lock)
 # laenger haelt eine wartende anfrage der brille keinen server thread fest
 SCREEN_WAIT_MAX_S = 2.0
 
@@ -349,6 +352,27 @@ def get_screen(after: int = 0, wait: float = 0.0):
     if seq <= after or not jpeg:
         return Response(status_code=204)
     return Response(jpeg, media_type="image/jpeg", headers={"X-Seq": str(seq)})
+
+
+@router.post("/shot")
+async def post_shot(request: Request, seq: int, pointing: int = 0) -> JSONResponse:
+    jpeg = await request.body()
+    with _lock:
+        _shot.update(seq=seq, jpeg=jpeg, pointing=pointing)
+        _shot_changed.notify_all()
+    return JSONResponse({"ok": True})
+
+
+@router.get("/shot", response_model=None)
+def get_shot(seq: int, wait: float = 0.0):
+    # 204 wenn napari bis dahin nicht geantwortet hat, die brille nimmt dann ihr eigenes bild
+    with _shot_changed:
+        if wait > 0:
+            _shot_changed.wait_for(lambda: _shot["seq"] >= seq, timeout=min(wait, SCREEN_WAIT_MAX_S))
+        found, jpeg, pointing = _shot["seq"] >= seq, _shot["jpeg"], _shot["pointing"]
+    if not found or not jpeg:
+        return Response(status_code=204)
+    return Response(jpeg, media_type="image/jpeg", headers={"X-Pointing": str(pointing)})
 
 
 def _find_volume(name: str) -> Path | None:

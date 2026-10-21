@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 import numpy as np
 import requests
+from PIL import Image
 
 MAX_CHANNELS = 3
 # liegt nur bei einer installation aus dem repo (pip install -e) an dieser stelle
@@ -203,6 +204,14 @@ def fetch_pointer(server: str, after: int, wait_s: float = 1.0) -> dict:
 def post_screen(server: str, jpeg: bytes) -> None:
     _http().post(f"{_url(server)}/vr/screen", data=jpeg, headers={"Content-Type": "image/jpeg"},
                  timeout=3).raise_for_status()
+
+
+def post_shot(server: str, seq: int, rgba: np.ndarray, pointing: int) -> None:
+    # canvas bild fuers sprachmodell, gleiche qualitaet wie die brille es weiterschickt
+    buffer = io.BytesIO()
+    Image.fromarray(np.ascontiguousarray(rgba[..., :3])).save(buffer, "JPEG", quality=90)
+    _http().post(f"{_url(server)}/vr/shot", params={"seq": seq, "pointing": pointing}, data=buffer.getvalue(),
+                 headers={"Content-Type": "image/jpeg"}, timeout=5).raise_for_status()
 
 
 def ray_to_cube(start, end, shape_zyx) -> dict:

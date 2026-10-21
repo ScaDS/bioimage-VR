@@ -63,6 +63,17 @@ namespace BioimageVR
         // von der zellliste, zeile unter dem strahl, 0 wenn keine
         public void SetListHover(int id) => listHover = id;
 
+        // zelle unter strahl oder zeile fuers sprachmodell, auch bei ausgeblendeter maske
+        public int PointedLabel()
+        {
+            if (!volumeView.HasLabels) return 0;
+            if (listHover > 0) return listHover;
+            Ray?[] rays = { HandRay(rightHandRay), HandRay(leftHandRay), XRSettings.isDeviceActive ? null : MouseRay() };
+            foreach (Ray? ray in rays)
+                if (ray.HasValue && volumeView.TryPickCell(ray.Value, out int id, out _)) return id;
+            return 0;
+        }
+
         private bool Active => volumeView.HasLabels && volumeView.ShowLabels;
         private bool MeasureOwnsClicks => measureTool != null && measureTool.CurrentMode != MeasureTool.Mode.Off;
 

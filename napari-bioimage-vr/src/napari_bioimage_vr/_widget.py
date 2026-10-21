@@ -128,6 +128,9 @@ class BioimageVRWidget(QWidget):
         self._pointer_backlog = []
         self._pointer_busy = False
         self.pointer_events.connect(self._inject_pointer)
+        # letzte beantwortete bildanfrage des sprachmodells und wann die maus zuletzt ueber dem bild lief
+        self._shot_seq = 0
+        self._mouse_time = 0.0
         threading.Thread(target=self._pointer_loop, daemon=True).start()
         self._presence_timer = QTimer(self)
         self._presence_timer.setInterval(2000)
@@ -499,6 +502,7 @@ class BioimageVRWidget(QWidget):
 
     def _mouse_moved(self, viewer, event) -> None:
         # mauszeiger ueber dem bild, die brille zeichnet ihn als linie durchs volumen
+        self._mouse_time = time.monotonic()
         if self._live_worker is None or self._lead == LEAD_VR or viewer.dims.ndisplay != 3:
             return
         reference = self._reference_layer()
@@ -872,6 +876,7 @@ class BioimageVRWidget(QWidget):
         self._show_lead()
         self._want_screen(self._screen_on)
         self._follow_window(view)
+        self._answer_shot(int(view.get("shotSeq") or 0))
         self._watch_painting()
         self._follow_saved_labels(view)
         if view.get("name"):
@@ -909,6 +914,32 @@ class BioimageVRWidget(QWidget):
                     camera.zoom = self._zoom_link * vr_scale
         finally:
             self._applying = False
+
+    def _answer_shot(self, seq: int) -> None:
+        # das sprachmodell der brille fragt, canvas ohne knoepfe statt des bilds aus der app
+        if seq <= self._shot_seq:
+            return
+        self._shot_seq = seq
+        rgba = self.viewer.screenshot(canvas_only=True, flash=False)
+        pointing = self._label_under_mouse()
+        threading.Thread(target=_bridge.post_shot, args=(self.server, seq, rgba, pointing), daemon=True).start()
+
+    def _label_under_mouse(self) -> int:
+        # zeiger der brille auf der leinwand bewegt die maus hier mit, 0 wenn sie nicht auf einer zelle steht
+        labels_layer = self._selected_labels()
+        recent = time.monotonic() - self._mouse_time < POINTER_SHOWN_S
+        if labels_layer is None or not (self.viewer.mouse_over_canvas or recent):
+            return 0
+        direction = _camera(self.viewer).calculate_nd_view_direction(self.viewer.dims.ndim, self.viewer.dims.displayed)
+        try:
+            value = labels_layer.get_value(self.viewer.cursor.position, view_direction=direction,
+                                           dims_displayed=list(self.viewer.dims.displayed), world=True)
+        except Exception:
+            return 0
+        # mehrstufige masken liefern ebene und wert
+        if isinstance(value, tuple):
+            value = value[-1]
+        return int(value) if value else 0
 
     def _apply_selection(self, selected: int) -> None:
         labels_layer = self._selected_labels()

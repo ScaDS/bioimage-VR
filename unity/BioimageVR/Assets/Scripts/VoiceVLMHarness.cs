@@ -7,7 +7,7 @@ using UnityEngine.UI;
 
 namespace BioimageVR
 {
-    // push to talk, aufnahme an stt, text plus screenshot plus rag kontext ans vlm
+    // push to talk, aufnahme an stt, text plus napari bild plus zeiger und rag kontext ans vlm
     [RequireComponent(typeof(VLMClient))]
     [RequireComponent(typeof(STTClient))]
     [RequireComponent(typeof(RagClient))]
@@ -30,6 +30,19 @@ namespace BioimageVR
         private AudioClip recordingClip;
         private bool isRecording;
         private bool requestInFlight;
+        private VrBridge bridge;
+        private CellInspector inspector;
+
+        // was beim druecken der sprechtaste zu sehen war und worauf gezeigt wurde
+        private class Moment
+        {
+            public int Pointed;
+            public Texture2D Shot;
+            public int NapariPointed;
+            public bool ShotDone;
+            public bool Dropped;
+        }
+        private Moment moment;
 
         private void Awake()
         {
@@ -41,6 +54,8 @@ namespace BioimageVR
                 type: InputActionType.Button,
                 binding: "<XRController>{RightHand}/triggerButton");
             controllerRecordAction.Enable();
+            bridge = FindFirstObjectByType<VrBridge>();
+            if (volumeView != null) inspector = volumeView.GetComponent<CellInspector>();
         }
 
         private void OnDestroy()
@@ -73,6 +88,33 @@ namespace BioimageVR
             isRecording = true;
             SetStatus("Listening ...");
             recordingClip = Microphone.Start(null, false, maxRecordSeconds, sampleRate);
+            moment = Capture();
+        }
+
+        // napari laedt sein bild waehrend gesprochen wird, die frage wartet danach kaum noch
+        private Moment Capture()
+        {
+            var m = new Moment { Pointed = inspector != null ? inspector.PointedLabel() : 0 };
+            if (bridge == null)
+            {
+                m.ShotDone = true;
+                return m;
+            }
+            StartCoroutine(bridge.NapariShot((shot, pointed) =>
+            {
+                if (m.Dropped && shot != null) Destroy(shot);
+                else m.Shot = shot;
+                m.NapariPointed = pointed;
+                m.ShotDone = true;
+            }));
+            return m;
+        }
+
+        private void Drop(Moment m)
+        {
+            m.Dropped = true;
+            if (m.Shot != null) Destroy(m.Shot);
+            m.Shot = null;
         }
 
         private void StopRecordingAndAsk()
@@ -84,13 +126,14 @@ namespace BioimageVR
             if (recordingClip == null || recordedSamples <= 0)
             {
                 SetStatus("Nothing recorded, too short or no microphone.");
+                Drop(moment);
                 return;
             }
 
-            StartCoroutine(TranscribeCaptureAndAsk(TrimClip(recordingClip, recordedSamples)));
+            StartCoroutine(TranscribeCaptureAndAsk(TrimClip(recordingClip, recordedSamples), moment));
         }
 
-        private IEnumerator TranscribeCaptureAndAsk(AudioClip clip)
+        private IEnumerator TranscribeCaptureAndAsk(AudioClip clip, Moment m)
         {
             requestInFlight = true;
             SetStatus("Transcribing ...");
@@ -108,6 +151,7 @@ namespace BioimageVR
             {
                 SetStatus($"Speech recognition failed: {sttError}");
                 chatPanel?.AddSystemMessage($"Speech recognition failed: {sttError}");
+                Drop(m);
                 requestInFlight = false;
                 yield break;
             }
@@ -115,6 +159,7 @@ namespace BioimageVR
             {
                 SetStatus("No speech recognised.");
                 chatPanel?.AddSystemMessage("No speech recognised.");
+                Drop(m);
                 requestInFlight = false;
                 yield break;
             }
@@ -137,10 +182,18 @@ namespace BioimageVR
             }
 
             SetStatus($"\"{question}\" · capturing the view ...");
-            // frame warten, sonst landet der statustext im screenshot
-            yield return null;
-            yield return new WaitForEndOfFrame();
-            Texture2D screenshot = SceneScreenshot.Capture(Camera.main);
+            yield return new WaitUntil(() => m.ShotDone);
+            Texture2D screenshot = m.Shot;
+            bool fromNapari = screenshot != null;
+            if (!fromNapari)
+            {
+                // napari laeuft nicht, dann das bild aus der app. frame warten, sonst landet der statustext darin
+                yield return null;
+                yield return new WaitForEndOfFrame();
+                screenshot = SceneScreenshot.Capture(Camera.main);
+            }
+            string situation = Describe(m, fromNapari);
+            context = string.IsNullOrEmpty(context) ? situation : situation + "\n\n" + context;
 
             SetStatus($"\"{question}\" · asking the assistant ...");
             vlmClient.AskAboutImage(screenshot, question, context, VLMToolDispatcher.Tools,
@@ -170,6 +223,30 @@ namespace BioimageVR
                     requestInFlight = false;
                 });
         }
+
+        // bildquelle, zeiger und auswahl, steht immer vor dem rag kontext
+        private string Describe(Moment m, bool fromNapari)
+        {
+            var lines = new List<string>
+            {
+                fromNapari
+                    ? "The image is the napari canvas on the PC, showing the same volume as the user's VR view."
+                    : "The image is the user's view in VR."
+            };
+            if (volumeView != null && volumeView.HasLabels)
+            {
+                lines.Add(m.Pointed > 0
+                    ? $"The user is pointing at {Cell(m.Pointed)} in the 3D view."
+                    : "The user is not pointing at a segmented cell in the 3D view.");
+                if (fromNapari && m.NapariPointed > 0 && m.NapariPointed != m.Pointed)
+                    lines.Add($"The mouse in napari is on {Cell(m.NapariPointed)}.");
+                if (volumeView.SelectedLabel > 0)
+                    lines.Add($"Selected: {Cell(volumeView.SelectedLabel)}.");
+            }
+            return string.Join("\n", lines);
+        }
+
+        private string Cell(int id) => $"{volumeView.LabelName(id)} (label {id})";
 
         // idr bild id aus dem dateinamen idr_<id>.nii.gz
         private int? CurrentIdrImageId()
