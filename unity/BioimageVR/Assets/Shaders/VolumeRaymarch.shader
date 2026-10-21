@@ -9,9 +9,7 @@ Shader "BioimageVR/VolumeRaymarch"
         _VolumeTex ("Volume Texture", 3D) = "white" {}
         _Density ("Density", Range(0.01, 5)) = 1.0
         _Threshold ("Intensity Threshold", Range(0, 1)) = 0.12
-        // 30.09.: schrittweite waechst mit der entfernung zur kamera statt fester 64 schritte
-        // pro strahl. nah fein bis zum halben voxel, fern grob, dadurch scharfe waende beim
-        // reinfliegen und beim normalen draufschauen sogar weniger schritte als vorher
+        // 30.09.: schrittweite waechst mit der entfernung, nah fein bis zum halben voxel, fern grob
         _StepScale ("Step Scale (fraction of distance)", Range(0.01, 0.1)) = 0.04
         _MaxSteps ("Max Ray Steps", Range(32, 512)) = 192
         // kleinster schritt in voxeln, VolumeStepGovernor hebt ihn bei last an
@@ -32,15 +30,12 @@ Shader "BioimageVR/VolumeRaymarch"
         [Toggle] _EnableShading ("Gradient Shading", Float) = 1
         _ThresholdMax ("Cut Range Max", Range(0, 1)) = 1.0
         [Enum(Translucent,0,MIP,1,Surface,2)] _RenderMode ("Render Mode", Float) = 0
-        // surface modus, erste wand ueber threshold wie beim endoskop
-        // licht sitzt am kopf und faellt mit der entfernung ab, reichweite in metern im raum
-        // beides setzt VolumeView jeden frame
+        // surface modus wie beim endoskop, lampe am kopf mit reichweite in metern, setzt VolumeView jeden frame
         _LampRange ("Headlamp Range (m)", Range(0.05, 20)) = 2.0
         [HideInInspector] _LampPosWS ("Headlamp Position", Vector) = (0, 0, 0, 0)
         // ecken und falten dunkler, gibt den gaengen form
         _SurfaceAO ("Surface Occlusion", Range(0, 1)) = 0.5
-        // farbe kommt aus den daten, grau bleibt grau, kanaele behalten ihre farbe
-        // die toenung multipliziert nur, weiss heisst neutral
+        // farbe kommt aus den daten, die toenung multipliziert nur, weiss heisst neutral
         _SurfaceTint ("Surface Tint", Color) = (1, 1, 1, 1)
         // 22.09.: sigg/hadwiger tricubic (8 statt 64 fetches), siehe SampleVoxelCubic.
         // eigener toggle statt fest an, weil das den hauptsample teuer macht (8x) -
@@ -54,8 +49,7 @@ Shader "BioimageVR/VolumeRaymarch"
         [HideInInspector] _HoverLabel ("Hover Label", Float) = 0
         // 256x256 r8, 0 heisst zelle ausgeblendet, siehe VolumeView.SetCellVisible
         [HideInInspector] _LabelVisTex ("Label Visibility", 2D) = "white" {}
-        // 30.09.: hellster wert je 8er block, von VolumeView beim laden gerechnet
-        // leere bloecke ueberspringt der strahl in einem satz, _BrickCount.x 0 heisst aus
+        // 30.09.: hellster wert je 8er block, leere bloecke ueberspringt der strahl, _BrickCount.x 0 heisst aus
         [HideInInspector] _BrickTex ("Brick Max", 3D) = "white" {}
         [HideInInspector] _BrickCount ("Brick Count", Vector) = (0, 0, 0, 8)
         // 28.09.: 0.6 war auf der brille zu blass
@@ -315,8 +309,7 @@ Shader "BioimageVR/VolumeRaymarch"
                 else SampleVoxel(uvw, color, intensity);
             }
 
-            // 30.09.: tricubic nur wo die schritte feiner als ca. 1.5 voxel sind, also nah an
-            // der kamera. weiter weg sieht man den unterschied nicht, spart dort 7 von 8 fetches
+            // 30.09.: tricubic nur nah an der kamera wo die schritte unter 1.5 voxel liegen, spart fern 7 von 8 fetches
             void SampleVoxelAt(float3 uvw, float stepSize, float minStep, out half3 color, out half intensity)
             {
                 float voxel = 1.0 / max(max(_VolumeSize.x, _VolumeSize.y), _VolumeSize.z);
@@ -353,14 +346,7 @@ Shader "BioimageVR/VolumeRaymarch"
                 return saturate(color * diffuse + specular);
             }
 
-            // billiger screen-space hash (keine textur/noise-map noetig) - streut den
-            // start jedes strahls um einen zufaelligen bruchteil einer schrittweite,
-            // bricht dadurch das feste "an jedem pixel exakt an derselben relativen
-            // tiefe abgetastet"-muster auf, das als sichtbare schichten/ringe um
-            // strukturen erscheint (STATUS.md 26.08., Punkt 2 wunschliste, standardtrick
-            // gegen raymarch-banding, keine mehrkosten an samples)
-            // 30.09.: interleaved gradient noise (jimenez) statt weissem hash rauschen,
-            // das war koernig. gleichmaessiger verteilt, muster fein statt fleckig, gleich billig
+            // strahlstart um einen bruchteil eines schritts streuen gegen ringe, 30.09.: interleaved gradient noise statt hash
             float RayJitter(float2 screenPos)
             {
                 return frac(52.9829189 * frac(dot(floor(screenPos), float2(0.06711056, 0.00583715))));
@@ -397,8 +383,7 @@ Shader "BioimageVR/VolumeRaymarch"
                 return true;
             }
 
-            // surface modus tastet nah an der kamera immer tricubic ab, auch wenn der schalter aus ist
-            // trilinear zeigt beim reinfliegen das voxelraster als stufen und facetten auf der wand
+            // surface modus nah immer tricubic, trilinear zeigt beim reinfliegen stufen auf der wand
             half SurfaceIntensity(float3 uvw, float stepSize)
             {
                 half3 color;
@@ -416,9 +401,7 @@ Shader "BioimageVR/VolumeRaymarch"
                 return intensity > _Threshold && intensity <= _ThresholdMax && !LabelHidden(LabelAt(uvw));
             }
 
-            // surface modus, erster uebergang luft zu gewebe entlang des strahls
-            // startet die kamera im gewebe, zaehlt erst die naechste wand nach dem austritt
-            // kante danach per halbierung auf bruchteile eines voxels genau
+            // erste wand luft zu gewebe entlang des strahls, aus dem gewebe heraus erst die naechste, kante per halbierung
             half4 SurfaceHit(float3 rayOrigin, float3 rayDir, float t, float tFar, float minStep, float maxStep, float jitter)
             {
                 bool wasTissue = IsTissue(rayOrigin + rayDir * t + 0.5, clamp(t * _StepScale, minStep, maxStep), minStep);
@@ -470,14 +453,12 @@ Shader "BioimageVR/VolumeRaymarch"
                     SurfaceIntensity(uvw + float3(0, 0, d.z), nearStep) - SurfaceIntensity(uvw - float3(0, 0, d.z), nearStep));
                 float gradLen = length(grad);
 
-                // licht im weltraum rechnen, der wuerfel ist je achse anders skaliert
-                // grad ist pro voxel, mal voxelzahl gibt den gradienten im objekt raum
+                // licht im weltraum, der wuerfel ist je achse anders skaliert, grad mal voxelzahl ist der objekt gradient
                 float3 hitWS = TransformObjectToWorld(hitPos);
                 float3 viewDirWS = normalize(GetCameraPositionWS() - hitWS);
                 float3 normalWS = gradLen > 1e-5 ? TransformObjectToWorldNormal(-grad * _VolumeSize) : viewDirWS;
 
-                // lampe mittig am kopf statt pro auge, sonst sind nahe waende links und rechts
-                // verschieden hell. beidseitig falls man im gewebe steckt
+                // lampe mittig am kopf statt pro auge, licht beidseitig falls man im gewebe steckt
                 float3 toLamp = _LampPosWS - hitWS;
                 float lampDist = max(length(toLamp), 1e-4);
                 float3 lightDirWS = toLamp / lampDist;
